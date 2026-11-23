@@ -18,15 +18,16 @@ import {
   createOnixWaterMaterial,
   createOnixPlaidMaterial
 } from './onixShaders.js';
+import { PainterlyPost } from './painterlyPost.js';
 
 const CHUNK_SIZE = 120;
 const CHUNK_RADIUS = 4;
 
-// Camera-forward foliage carpet: shifts 26m ahead of Callum and fades cleanly out to 86m
-const FOLIAGE_STEP = 1.65;
-const FOLIAGE_HALF_GRID = 38;
-const MAX_GRASS = 3400;
-const MAX_HEATHER = 2200;
+// Camera-forward lush ground flora streaming (shifts ahead of gaze + smooth height-sink out to 90m)
+const FOLIAGE_STEP = 1.45;
+const FOLIAGE_HALF_GRID = 40;
+const MAX_GRASS = 4200;
+const MAX_HEATHER = 2800;
 
 function mergeNonIndexedGeos(geos) {
   const parts = geos.map((g) => (g.index ? g.toNonIndexed() : g.clone()));
@@ -59,7 +60,7 @@ function mergeNonIndexedGeos(geos) {
   return out;
 }
 
-// Painterly alpha-feathered Caledonian Scots Pine bough texture (airy sky gaps, zero solid blobs)
+// Painterly Scots Pine bough texture: full feathery needle fans with natural sky gaps
 function createPainterlyPineBoughTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
@@ -70,39 +71,42 @@ function createPainterlyPineBoughTexture(aniso = 8) {
   ctx.clearRect(0, 0, size, size);
 
   const cx = size * 0.5;
-  const cy = size * 0.54;
+  const cy = size * 0.52;
 
-  // Fine reddish-brown interior Scots pine twigs
-  ctx.strokeStyle = '#3f281b';
+  ctx.strokeStyle = '#3b2518';
   ctx.lineCap = 'round';
-  for (let b = 0; b < 6; b++) {
-    const a = -Math.PI * 0.92 + (b / 5) * Math.PI * 0.84 + (rng() - 0.5) * 0.25;
-    const len = 58 + rng() * 44;
-    ctx.lineWidth = 3.2;
+  for (let b = 0; b < 7; b++) {
+    const a = -Math.PI * 0.94 + (b / 6) * Math.PI * 0.88 + (rng() - 0.5) * 0.25;
+    const len = 62 + rng() * 44;
+    ctx.lineWidth = 3.6;
     ctx.beginPath();
     ctx.moveTo(cx, cy + 16);
-    ctx.quadraticCurveTo(cx + Math.cos(a) * len * 0.5, cy + Math.sin(a) * len * 0.35, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+    ctx.quadraticCurveTo(
+      cx + Math.cos(a) * len * 0.5,
+      cy + Math.sin(a) * len * 0.35,
+      cx + Math.cos(a) * len,
+      cy + Math.sin(a) * len
+    );
     ctx.stroke();
   }
 
-  // Clustered radiating painterly pine-needle fans (leaves organic daylight holes between clusters)
-  const clusters = 15;
-  for (let c = 0; c < clusters; c++) {
+  // Rich layered needle brush clusters (deep shadow undersides -> sunlit olive-gold crown needles)
+  for (let c = 0; c < 22; c++) {
     const ang = rng() * Math.PI * 2;
-    const dist = Math.pow(rng(), 0.72) * 74;
+    const dist = Math.pow(rng(), 0.68) * 82;
     const kx = cx + Math.cos(ang) * dist;
     const ky = cy + Math.sin(ang) * dist * 0.78 - 6;
-    const sunBias = clamp(1 - ky / size + (rng() - 0.5) * 0.25, 0, 1);
+    const sunBias = clamp(1 - ky / size + (rng() - 0.5) * 0.28, 0, 1);
 
-    for (let n = 0; n < 38; n++) {
+    for (let n = 0; n < 44; n++) {
       const na = rng() * Math.PI * 2;
-      const nr = 10 + rng() * 26;
-      const r = Math.round(lerp(22, 64, sunBias) + (rng() - 0.5) * 14);
-      const g = Math.round(lerp(42, 92, sunBias) + (rng() - 0.5) * 18);
-      const b = Math.round(lerp(28, 46, sunBias) + (rng() - 0.5) * 10);
+      const nr = 12 + rng() * 28;
+      const r = Math.round(lerp(20, 70, sunBias) + (rng() - 0.5) * 14);
+      const g = Math.round(lerp(40, 96, sunBias) + (rng() - 0.5) * 18);
+      const b = Math.round(lerp(26, 44, sunBias) + (rng() - 0.5) * 10);
 
       ctx.strokeStyle = `rgb(${r},${g},${b})`;
-      ctx.lineWidth = 2.0 + rng() * 1.4;
+      ctx.lineWidth = 2.4 + rng() * 1.6;
       ctx.beginPath();
       ctx.moveTo(kx, ky);
       ctx.lineTo(kx + Math.cos(na) * nr, ky + Math.sin(na) * nr * 0.82);
@@ -117,7 +121,48 @@ function createPainterlyPineBoughTexture(aniso = 8) {
   return tex;
 }
 
-// Painterly feathery Highland Bell-Heather sprig texture (woody stems + delicate wine/plum floret strokes)
+// Soft painterly Highland sedge & wild moor grass fan (replaces harsh dark polygonal spikes!)
+function createPainterlyGrassTexture(aniso = 8) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rng = mulberry32(51744);
+  ctx.clearRect(0, 0, size, size);
+
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 64; i++) {
+    const sx = size * (0.10 + rng() * 0.80);
+    const h = size * (0.34 + rng() * 0.58);
+    const lean = (sx - size * 0.5) * 0.75 + (rng() - 0.5) * 70;
+    const ex = clamp(sx + lean, 8, size - 8);
+    const ey = clamp(size - h, 8, size - 16);
+    const mx = (sx + ex) * 0.5 + (rng() - 0.5) * 16;
+    const my = (size + ey) * 0.52;
+
+    const isGolden = rng() > 0.42;
+    const grad = ctx.createLinearGradient(sx, size, ex, ey);
+    grad.addColorStop(0, '#364622'); // Warm terrain-matched moss base (zero black spikes!)
+    grad.addColorStop(0.52, isGolden ? '#6c682e' : '#4a622a');
+    grad.addColorStop(1, isGolden ? '#b09248' : '#7b8d42');
+
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 3.2 + rng() * 3.4;
+    ctx.beginPath();
+    ctx.moveTo(sx, size + 4);
+    ctx.quadraticCurveTo(mx, my, ex, ey);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(aniso, 8);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Lush painterly Highland bell-heather shrub texture (thick plum, magenta-wine & moss sprigs)
 function createPainterlyHeatherSprigTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
@@ -127,61 +172,55 @@ function createPainterlyHeatherSprigTexture(aniso = 8) {
   const rng = mulberry32(81744);
   ctx.clearRect(0, 0, size, size);
 
-  // Branching woody heather stems sweeping outward from root
-  const stems = 26;
-  for (let s = 0; s < stems; s++) {
-    const sx = size * (0.20 + rng() * 0.60);
-    const h = size * (0.36 + rng() * 0.52);
-    const lean = (sx - size * 0.5) * 1.05 + (rng() - 0.5) * 58;
-    const ex = clamp(sx + lean, 12, size - 12);
-    const ey = clamp(size - h, 14, size - 20);
+  for (let s = 0; s < 38; s++) {
+    const sx = size * (0.14 + rng() * 0.72);
+    const h = size * (0.34 + rng() * 0.56);
+    const lean = (sx - size * 0.5) * 1.15 + (rng() - 0.5) * 62;
+    const ex = clamp(sx + lean, 10, size - 10);
+    const ey = clamp(size - h, 10, size - 16);
     const mx = (sx + ex) * 0.5 + (rng() - 0.5) * 18;
     const my = (size + ey) * 0.5;
 
-    // Woody evergreen base stem
-    ctx.strokeStyle = '#333b22';
-    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = '#394525';
+    ctx.lineWidth = 3.4;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(sx, size + 2);
     ctx.quadraticCurveTo(mx, my, ex, ey);
     ctx.stroke();
 
-    // Fine olive foliage & feathery painterly heather blossom spikes along upper stem
-    const hasFlower = rng() > 0.24;
-    for (let t = 0.22; t <= 1.0; t += 0.075) {
+    const hasFlower = rng() > 0.16;
+    for (let t = 0.20; t <= 1.0; t += 0.068) {
       const omt = 1 - t;
       const px = omt * omt * sx + 2 * omt * t * mx + t * t * ex;
       const py = omt * omt * size + 2 * omt * t * my + t * t * ey;
 
-      if (hasFlower && t > 0.44) {
-        // Muted Romantic heather wine, dusky plum, and rose-violet oil dabs
-        const r = Math.round(112 + rng() * 62);
-        const g = Math.round(48 + rng() * 34);
-        const b = Math.round(98 + rng() * 58);
+      if (hasFlower && t > 0.36) {
+        const r = Math.round(126 + rng() * 68);
+        const g = Math.round(48 + rng() * 38);
+        const b = Math.round(112 + rng() * 64);
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.beginPath();
         ctx.ellipse(
-          px + (rng() - 0.5) * 12,
-          py + (rng() - 0.5) * 8,
-          3.2 + rng() * 4.2,
-          2.2 + rng() * 2.8,
+          px + (rng() - 0.5) * 14,
+          py + (rng() - 0.5) * 10,
+          4.0 + rng() * 4.8,
+          2.6 + rng() * 3.2,
           rng() * Math.PI,
           0,
           Math.PI * 2
         );
         ctx.fill();
       } else {
-        // Deep Scottish heather-moss needles blending down into the turf
-        const r = Math.round(46 + rng() * 26);
-        const g = Math.round(68 + rng() * 32);
+        const r = Math.round(48 + rng() * 28);
+        const g = Math.round(70 + rng() * 34);
         const b = Math.round(30 + rng() * 18);
         ctx.strokeStyle = `rgb(${r},${g},${b})`;
-        ctx.lineWidth = 2.4;
+        ctx.lineWidth = 2.6;
         const a = -Math.PI * 0.5 + (rng() - 0.5) * 1.9;
         ctx.beginPath();
         ctx.moveTo(px, py);
-        ctx.lineTo(px + Math.cos(a) * 11, py + Math.sin(a) * 11);
+        ctx.lineTo(px + Math.cos(a) * 12, py + Math.sin(a) * 12);
         ctx.stroke();
       }
     }
@@ -194,95 +233,37 @@ function createPainterlyHeatherSprigTexture(aniso = 8) {
   return tex;
 }
 
-// Lush 16-blade arching Highland sedge & moor-grass clump with terrain-matched roots (zero dark rug seam!)
-function create3DGrassClumpGeometry() {
-  const rng = mulberry32(3041);
-  const blades = 16;
-  const positions = [];
-  const normals = [];
-  const colors = [];
-
-  for (let b = 0; b < blades; b++) {
-    const ang = (b / blades) * Math.PI * 2 + (rng() - 0.5) * 0.5;
-    const rad = 0.04 + rng() * 0.34;
-    const bx = Math.cos(ang) * rad;
-    const bz = Math.sin(ang) * rad;
-    const isTallReed = rng() > 0.62;
-    const h = isTallReed ? 0.42 + rng() * 0.34 : 0.22 + rng() * 0.24;
-    const w0 = 0.032 + rng() * 0.018;
-    const lean = 0.14 + rng() * 0.28;
-    const isGolden = rng() > 0.42;
-
-    const dirX = Math.cos(ang);
-    const dirZ = Math.sin(ang);
-    const perpX = -dirZ;
-    const perpZ = dirX;
-
-    const p0L = [bx - perpX * w0, 0, bz - perpZ * w0];
-    const p0R = [bx + perpX * w0, 0, bz + perpZ * w0];
-    const p1L = [bx + dirX * lean * 0.45 - perpX * w0 * 0.5, h * 0.55, bz + dirZ * lean * 0.45 - perpZ * w0 * 0.5];
-    const p1R = [bx + dirX * lean * 0.45 + perpX * w0 * 0.5, h * 0.55, bz + dirZ * lean * 0.45 + perpZ * w0 * 0.5];
-    const p2T = [bx + dirX * lean, h, bz + dirZ * lean];
-
-    // Terrain-matched warm moss root -> sunlit olive/ochre tip so mid-ground melts cleanly into the hillside
-    const cRoot = [0.052, 0.074, 0.026];
-    const cMid = isGolden ? [0.115, 0.098, 0.038] : [0.072, 0.098, 0.032];
-    const cTip = isGolden ? [0.215, 0.165, 0.062] : [0.122, 0.140, 0.048];
-    const nUp = [dirX * 0.18, 0.98, dirZ * 0.18];
-
-    const pushTri = (a, cA, bV, cB, c, cC) => {
-      positions.push(...a, ...bV, ...c);
-      normals.push(...nUp, ...nUp, ...nUp);
-      colors.push(...cA, ...cB, ...cC);
-    };
-
-    pushTri(p0L, cRoot, p0R, cRoot, p1R, cMid);
-    pushTri(p0L, cRoot, p1R, cMid, p1L, cMid);
-    pushTri(p1L, cMid, p1R, cMid, p2T, cTip);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  return geo;
-}
-
-// Feathered painterly heather bush (4 cupped crossed sprig planes with soft spherical upward normals)
-function createFeatheredHeatherShrubGeometry() {
+// Soft crossed curved bush/sedge fan with transferred upward spherical normals
+function createFeatheredTuftGeometry(width, height, cardCount = 3) {
   const planes = [];
-  const configs = [
-    { rotY: 0.0, tilt: 0.14, w: 0.95, h: 0.56, ox: 0, oz: 0 },
-    { rotY: Math.PI * 0.34, tilt: -0.14, w: 0.92, h: 0.52, ox: 0.06, oz: -0.05 },
-    { rotY: Math.PI * 0.68, tilt: 0.16, w: 0.88, h: 0.50, ox: -0.06, oz: 0.05 },
-    { rotY: Math.PI * 0.18, tilt: 0.38, w: 0.78, h: 0.46, ox: 0.0, oz: 0.08 }
-  ];
+  for (let c = 0; c < cardCount; c++) {
+    const g = new THREE.PlaneGeometry(width, height, 2, 2);
+    g.translate(0, height * 0.45, 0);
 
-  for (const cfg of configs) {
-    const g = new THREE.PlaneGeometry(cfg.w, cfg.h, 2, 2);
-    g.translate(0, cfg.h * 0.46, 0);
-    g.rotateX(cfg.tilt);
-    g.rotateY(cfg.rotY);
-    g.translate(cfg.ox, 0, cfg.oz);
-
+    // Subtle natural outward arch
     const pos = g.attributes.position;
     const norm = g.attributes.normal;
     const cols = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const yNorm = clamp(pos.getY(i) / height, 0, 1);
+      pos.setZ(i, pos.getZ(i) + yNorm * yNorm * 0.14);
+    }
+
+    g.rotateX(c === cardCount - 1 ? 0.34 : (c % 2 === 0 ? 0.14 : -0.14));
+    g.rotateY((c / cardCount) * Math.PI + (c * 0.18));
 
     for (let i = 0; i < pos.count; i++) {
       const px = pos.getX(i);
       const py = pos.getY(i);
       const pz = pos.getZ(i);
-
-      // Transferred upward spherical normal removes flat-card harshness
-      const nx = px * 0.45;
+      const nx = px * 0.35;
       const ny = 1.0;
-      const nz = pz * 0.45;
+      const nz = pz * 0.35;
       const inv = 1 / Math.hypot(nx, ny, nz);
       norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
 
-      const yNorm = clamp(py / cfg.h, 0, 1);
-      const shade = lerp(0.76, 1.06, yNorm);
+      const yNorm = clamp(py / height, 0, 1);
+      const shade = lerp(0.84, 1.08, yNorm);
       cols[i * 3] = shade;
       cols[i * 3 + 1] = shade;
       cols[i * 3 + 2] = shade;
@@ -293,42 +274,42 @@ function createFeatheredHeatherShrubGeometry() {
   return mergeNonIndexedGeos(planes);
 }
 
-// Gnarled asymmetric Caledonian Scots Pine skeleton (crooked trunk + sweeping high umbrella boughs)
+// Majestic windswept Caledonian Scots Pine skeleton with broad layered umbrella boughs
 const PINE_BRANCH_TIPS = [
-  { x: 2.05, y: 5.3, z: 0.55, r: 2.35 },
-  { x: -1.75, y: 5.7, z: 1.55, r: 2.25 },
-  { x: -1.85, y: 6.15, z: -1.35, r: 2.30 },
-  { x: 1.35, y: 6.55, z: -1.65, r: 2.15 },
-  { x: 0.25, y: 7.25, z: 0.20, r: 2.55 },
-  { x: -0.65, y: 6.90, z: 0.65, r: 1.95 }
+  { x: 2.55, y: 5.5, z: 0.70, r: 3.1 },
+  { x: -2.25, y: 6.0, z: 1.85, r: 3.0 },
+  { x: -2.35, y: 6.5, z: -1.65, r: 3.1 },
+  { x: 1.85, y: 7.0, z: -2.05, r: 2.9 },
+  { x: 0.35, y: 7.9, z: 0.25, r: 3.5 },
+  { x: -0.95, y: 7.35, z: 0.90, r: 2.8 },
+  { x: 1.10, y: 7.55, z: 1.25, r: 2.7 }
 ];
 
 function createScotsPineWoodGeometry() {
   const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.13, 0.36, 7.1, 7, 6);
-  trunk.translate(0, 3.45, 0);
+  const trunk = new THREE.CylinderGeometry(0.15, 0.42, 7.8, 8, 6);
+  trunk.translate(0, 3.8, 0);
   const pos = trunk.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
-    pos.setX(i, pos.getX(i) + Math.sin(y * 0.46) * 0.28 + y * 0.04);
-    pos.setZ(i, pos.getZ(i) + Math.cos(y * 0.38) * 0.18);
+    pos.setX(i, pos.getX(i) + Math.sin(y * 0.42) * 0.34 + y * 0.045);
+    pos.setZ(i, pos.getZ(i) + Math.cos(y * 0.36) * 0.20);
   }
   trunk.computeVertexNormals();
   parts.push(trunk);
 
-  // Structural limbs reaching straight into each painterly foliage cluster
   for (let i = 0; i < 4; i++) {
     const tip = PINE_BRANCH_TIPS[i];
-    const startY = tip.y - 1.25;
-    const startX = Math.sin(startY * 0.46) * 0.28 + startY * 0.04;
-    const startZ = Math.cos(startY * 0.38) * 0.18;
+    const startY = tip.y - 1.45;
+    const startX = Math.sin(startY * 0.42) * 0.34 + startY * 0.045;
+    const startZ = Math.cos(startY * 0.36) * 0.20;
 
     const dx = tip.x - startX;
     const dy = tip.y - startY;
     const dz = tip.z - startZ;
     const len = Math.hypot(dx, dy, dz);
 
-    const limb = new THREE.CylinderGeometry(0.05, 0.12, len, 6);
+    const limb = new THREE.CylinderGeometry(0.06, 0.14, len, 6);
     limb.translate(0, len * 0.5, 0);
     const dir = new THREE.Vector3(dx, dy, dz).normalize();
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
@@ -339,24 +320,22 @@ function createScotsPineWoodGeometry() {
   return mergeNonIndexedGeos(parts);
 }
 
-// Feathered Painterly Scots Pine Canopy: airy crossed bough sprays + transferred spherical crown normals!
+// Full-crowned painterly Scots Pine canopy with transferred spherical lighting
 function createScotsPineCanopyFeatheredGeometry() {
   const rng = mulberry32(61744);
   const cards = [];
 
   for (const cluster of PINE_BRANCH_TIPS) {
-    // 5 randomly tilted feathered needle-bough cards per branch cluster -> rich airy oil-painted crown
-    for (let k = 0; k < 5; k++) {
-      const sz = cluster.r * (0.85 + rng() * 0.42);
-      const g = new THREE.PlaneGeometry(sz, sz * 0.88);
+    for (let k = 0; k < 6; k++) {
+      const sz = cluster.r * (0.88 + rng() * 0.42);
+      const g = new THREE.PlaneGeometry(sz, sz * 0.86);
 
-      const ox = cluster.x + (rng() - 0.5) * 0.95;
-      const oy = cluster.y + (rng() - 0.5) * 0.58;
-      const oz = cluster.z + (rng() - 0.5) * 0.95;
+      const ox = cluster.x + (rng() - 0.5) * 1.1;
+      const oy = cluster.y + (rng() - 0.5) * 0.68;
+      const oz = cluster.z + (rng() - 0.5) * 1.1;
 
-      // Tilt cards organically so crown reads full from ground level AND from high ridges
       const pitch = k === 0 ? -Math.PI * 0.42 : (rng() - 0.5) * 1.15;
-      const yaw = (k / 5) * Math.PI * 2 + rng() * 0.7;
+      const yaw = (k / 6) * Math.PI * 2 + rng() * 0.7;
       const roll = (rng() - 0.5) * 0.55;
 
       g.rotateX(pitch);
@@ -373,16 +352,14 @@ function createScotsPineCanopyFeatheredGeometry() {
         const py = pos.getY(i);
         const pz = pos.getZ(i);
 
-        // AAA Painterly Trick: Transfer spherical normals from the whole tree crown center
         const nx = px;
-        const ny = (py - 5.2) * 1.45 + 1.1;
+        const ny = (py - 5.5) * 1.4 + 1.1;
         const nz = pz;
         const inv = 1 / (Math.hypot(nx, ny, nz) || 1);
         norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
 
-        // Warm sunlit upper crown, deep cool-shaded bough undersides
-        const crownLift = clamp((py - 4.4) / 3.4, 0, 1);
-        const shade = lerp(0.56, 1.14, crownLift);
+        const crownLift = clamp((py - 4.8) / 3.8, 0, 1);
+        const shade = lerp(0.54, 1.16, crownLift);
         cols[i * 3] = shade;
         cols[i * 3 + 1] = shade;
         cols[i * 3 + 2] = shade;
@@ -395,7 +372,6 @@ function createScotsPineCanopyFeatheredGeometry() {
   return mergeNonIndexedGeos(cards);
 }
 
-// Authentic pitched gable roof for Highland stone blackhouses
 function createGableRoofGeometry(width, depth, ridgeHeight) {
   const hw = width * 0.5;
   const hd = depth * 0.5;
@@ -417,8 +393,9 @@ export class WorldRenderer {
     this.canvas = canvas;
     this.onixField = onixField;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.2, 2800);
+    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.2, 3200);
     this.renderer = null;
+    this.post = null;
     this.chunks = new Map();
     this.flickerLights = [];
     this.smokeParticles = [];
@@ -438,34 +415,34 @@ export class WorldRenderer {
       uRippleWorldSize: { value: this.onixField.rippleWorldSize },
       uTime: { value: 0 },
       uRain: { value: 0.0 },
-      uMistStrength: { value: 0.52 },
-      uDayFactor: { value: 1.0 },
-      uSunDir: { value: new THREE.Vector3(0.5, 0.45, -0.45).normalize() },
-      uSunColor: { value: new THREE.Color(0xffd79b) }
+      uMistStrength: { value: 0.55 },
+      uDayFactor: { value: 0.85 },
+      uSunDir: { value: new THREE.Vector3(-0.7, 0.22, -0.45).normalize() },
+      uSunColor: { value: new THREE.Color(0xffbd70) }
     };
   }
 
   init() {
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: false, // Handled cleanly inside PainterlyPost HDR pipeline
       powerPreference: 'high-performance'
     });
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    // Output pure Linear HDR into PainterlyPost so Turner Bloom + ACES + Kuwahara run once without double-gamma
+    this.renderer.toneMapping = THREE.NoToneMapping;
 
-    this.scene.fog = new THREE.FogExp2(0x7c8f9e, 0.00125);
+    this.scene.fog = new THREE.FogExp2(0x7c8f9e, 0.00095);
 
     const aniso = this.renderer.capabilities.getMaxAnisotropy();
     this.pineBoughTex = createPainterlyPineBoughTexture(aniso);
+    this.grassTex = createPainterlyGrassTexture(aniso);
     this.heatherSprigTex = createPainterlyHeatherSprigTexture(aniso);
 
-    // Pure-physics Romantic Oil Painting shaders
     this.terrainMat = createOnixTerrainMaterial(this.sharedUniforms);
     this.horizonMat = createOnixHorizonMaterial(this.sharedUniforms);
     this.stoneMat = createOnixStoneMaterial(this.sharedUniforms, { coursed: true, tint: 0xd8d6d0 });
@@ -485,10 +462,16 @@ export class WorldRenderer {
     this._buildStreaming3DFoliage();
     this._buildSmokeAndRain();
     this._buildCallumMesh();
+
+    this.post = new PainterlyPost(this.renderer);
+  }
+
+  toggleOilMode() {
+    return this.post ? this.post.toggleOilMode() : true;
   }
 
   getBackendName() {
-    return 'ONIX OIL PBR';
+    return this.post?.oilStrength > 0.5 ? 'ONIX OIL ENGINE' : 'ONIX RAW HDR';
   }
 
   _setupSkyAndIBL() {
@@ -496,10 +479,11 @@ export class WorldRenderer {
       uSunDir: this.sharedUniforms.uSunDir,
       uTime: this.sharedUniforms.uTime,
       uDayFactor: this.sharedUniforms.uDayFactor,
-      uGoldenFactor: { value: 0.45 },
-      uStormFactor: { value: 0.22 }
+      uGoldenFactor: { value: 0.72 },
+      uStormFactor: { value: 0.28 }
     };
 
+    // Pure Linear HDR J.M.W. Turner Atlantic Sky Dome (feeds golden sunbreaks straight into HDR Bloom!)
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -548,57 +532,58 @@ export class WorldRenderer {
           vec3 dir = normalize(vWorldDir);
           float h = clamp(dir.y, 0.0, 1.0);
 
-          vec3 nightZen = vec3(0.006, 0.012, 0.030);
-          vec3 nightHor = vec3(0.020, 0.034, 0.062);
+          vec3 nightZen = vec3(0.005, 0.011, 0.028);
+          vec3 nightHor = vec3(0.018, 0.032, 0.060);
 
-          vec3 dayZen = mix(vec3(0.055, 0.140, 0.295), vec3(0.065, 0.082, 0.112), uStormFactor);
+          vec3 dayZen = mix(vec3(0.048, 0.130, 0.285), vec3(0.060, 0.075, 0.105), uStormFactor);
           vec3 dayHor = mix(vec3(0.32, 0.42, 0.48), vec3(0.16, 0.19, 0.22), uStormFactor);
-          vec3 goldHor = vec3(0.92, 0.48, 0.16);
+          vec3 goldHor = vec3(1.18, 0.56, 0.18);
 
           vec3 zenith = mix(nightZen, dayZen, uDayFactor);
           vec3 horizon = mix(nightHor, dayHor, uDayFactor);
-          horizon = mix(horizon, goldHor, uGoldenFactor * 0.72 * (1.0 - uStormFactor * 0.65));
+          horizon = mix(horizon, goldHor, uGoldenFactor * 0.78 * (1.0 - uStormFactor * 0.62));
 
           vec3 col = mix(horizon, zenith, pow(h, 0.52));
 
+          // Radiant HDR Turner sunbreak halo -> drives cinematic bloom across the horizon & storm clouds
           float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
-          vec3 sunTint = mix(vec3(1.0, 0.56, 0.20), vec3(1.0, 0.90, 0.68), uDayFactor);
-          float sunVis = (1.0 - uStormFactor * 0.78) * uDayFactor;
-          col += sunTint * pow(sunDot, 6.0) * 0.46 * sunVis;
-          col += sunTint * smoothstep(0.9975, 0.9994, sunDot) * 5.2 * sunVis;
+          vec3 sunTint = mix(vec3(1.4, 0.64, 0.20), vec3(1.3, 1.05, 0.74), uDayFactor);
+          float sunVis = (1.0 - uStormFactor * 0.75) * uDayFactor;
+          col += sunTint * pow(sunDot, 5.0) * 0.62 * sunVis;
+          col += sunTint * smoothstep(0.9965, 0.9993, sunDot) * 4.5 * sunVis;
 
-          if (dir.y > 0.005) {
-            vec2 uv = dir.xz / (dir.y + 0.15) * 1.15;
+          // Towering billowing Romantic storm clouds with glowing sunlit rims & dark charcoal bellies
+          if (dir.y > 0.004) {
+            vec2 uv = dir.xz / (dir.y + 0.14) * 1.08;
             uv += vec2(uTime * 0.010, uTime * 0.004);
-            vec2 warp = vec2(fbm(uv * 0.8 + 1.4), fbm(uv * 0.8 + 5.2)) - 0.5;
-            float c1 = fbm(uv + warp * 0.85);
-            float c2 = fbm(uv * 2.3 - vec2(uTime * 0.005, 0.0) + warp * 0.45);
-            float cover = mix(0.42, 0.20, uStormFactor);
+            vec2 warp = vec2(fbm(uv * 0.75 + 1.4), fbm(uv * 0.75 + 5.2)) - 0.5;
+            float c1 = fbm(uv + warp * 0.92);
+            float c2 = fbm(uv * 2.2 - vec2(uTime * 0.005, 0.0) + warp * 0.45);
+            float cover = mix(0.40, 0.18, uStormFactor);
             float mask = smoothstep(cover, cover + 0.34, c1 * 0.68 + c2 * 0.32);
-            mask *= smoothstep(0.005, 0.18, dir.y);
+            mask *= smoothstep(0.004, 0.16, dir.y);
 
-            vec3 cLit = mix(vec3(0.04, 0.06, 0.09), vec3(0.84, 0.82, 0.78), uDayFactor);
-            cLit = mix(cLit, vec3(1.0, 0.68, 0.34), clamp(uGoldenFactor * 0.85 + pow(sunDot, 3.0) * 0.6, 0.0, 1.0) * (1.0 - uStormFactor * 0.6));
-            vec3 cDark = mix(vec3(0.015, 0.022, 0.038), mix(vec3(0.11, 0.14, 0.20), vec3(0.06, 0.08, 0.11), uStormFactor), uDayFactor);
+            vec3 cLit = mix(vec3(0.04, 0.06, 0.09), vec3(0.92, 0.88, 0.80), uDayFactor);
+            cLit = mix(cLit, vec3(1.55, 0.92, 0.40), clamp(uGoldenFactor * 0.88 + pow(sunDot, 3.0) * 0.7, 0.0, 1.0) * (1.0 - uStormFactor * 0.55));
+            vec3 cDark = mix(vec3(0.014, 0.020, 0.036), mix(vec3(0.08, 0.10, 0.15), vec3(0.045, 0.060, 0.085), uStormFactor), uDayFactor);
 
-            float rim = clamp(c2 * 1.1 + pow(sunDot, 4.0) * 0.9 * sunVis, 0.0, 1.0);
+            float rim = clamp(c2 * 1.12 + pow(sunDot, 3.5) * 1.05 * sunVis, 0.0, 1.0);
             vec3 cloudCol = mix(cDark, cLit, rim);
-            col = mix(col, cloudCol, mask * mix(0.88, 0.97, uStormFactor));
+            col = mix(col, cloudCol, mask * mix(0.90, 0.97, uStormFactor));
           }
 
           if (uDayFactor < 0.3 && dir.y > 0.08) {
             float star = step(0.9968, hash(floor(dir.xz / max(dir.y, 0.1) * 150.0)));
-            col += vec3(0.76, 0.84, 1.0) * star * (1.0 - uDayFactor * 3.2) * (1.0 - uStormFactor);
+            col += vec3(0.85, 0.92, 1.1) * star * (1.0 - uDayFactor * 3.2) * (1.0 - uStormFactor);
           }
 
+          // Output raw linear HDR directly to PainterlyPost
           gl_FragColor = vec4(col, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
         }
       `
     });
 
-    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(2450, 32, 20), skyMat);
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(2850, 32, 20), skyMat);
     this.skyDome.frustumCulled = false;
     this.scene.add(this.skyDome);
 
@@ -612,8 +597,8 @@ export class WorldRenderer {
         fragmentShader: `
           varying vec3 vP;
           void main() {
-            vec3 top = vec3(0.18, 0.30, 0.50);
-            vec3 mid = vec3(0.54, 0.48, 0.42);
+            vec3 top = vec3(0.16, 0.28, 0.48);
+            vec3 mid = vec3(0.62, 0.48, 0.36);
             vec3 bot = vec3(0.04, 0.05, 0.035);
             vec3 c = vP.y > 0.0 ? mix(mid, top, pow(vP.y, 0.58)) : mix(mid, bot, pow(-vP.y, 0.45));
             gl_FragColor = vec4(c, 1.0);
@@ -624,12 +609,12 @@ export class WorldRenderer {
     envScene.add(envSky);
     this.envRT = pmrem.fromScene(envScene, 0.04);
     this.scene.environment = this.envRT.texture;
-    this.scene.environmentIntensity = 0.78;
+    this.scene.environmentIntensity = 0.80;
     pmrem.dispose();
   }
 
   _setupLighting() {
-    this.hemiLight = new THREE.HemisphereLight(0x88b0d8, 0x282c1c, 0.56);
+    this.hemiLight = new THREE.HemisphereLight(0x88b0d8, 0x282c1c, 0.54);
     this.scene.add(this.hemiLight);
 
     this.sunLight = new THREE.DirectionalLight(0xffdfb0, 3.2);
@@ -649,7 +634,7 @@ export class WorldRenderer {
   }
 
   _buildWater() {
-    const geo = new THREE.PlaneGeometry(4200, 4200, 1, 1);
+    const geo = new THREE.PlaneGeometry(5200, 5200, 1, 1);
     geo.rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(geo, this.waterMat);
     this.waterMesh.position.y = WATER_LEVEL;
@@ -657,20 +642,19 @@ export class WorldRenderer {
     this.scene.add(this.waterMesh);
   }
 
-  // 2.4 km Lochaber Munro horizon ring (zero flat sky cutoff; frames Loch Linnhe with Ardgour hills to the west)
+  // FIXED Winding Order (+Y Upward Front Faces!): Grounded 2.6 km Lochaber & Ardgour Munro Mountain Ring
   _buildDistantMountains() {
-    const segAng = 88;
-    const segRad = 18;
-    const rInner = 430;
-    const rOuter = 2350;
+    const segAng = 108;
+    const segRad = 22;
+    const rInner = 450;
+    const rOuter = 2650;
 
     const verts = [];
     const indices = [];
 
     for (let ir = 0; ir <= segRad; ir++) {
       const t = ir / segRad;
-      // Exponential radial spacing: denser near chunks, sweeping out to 2.35 km
-      const r = lerp(rInner, rOuter, t * t * 0.7 + t * 0.3);
+      const r = lerp(rInner, rOuter, t * t * 0.65 + t * 0.35);
 
       for (let ia = 0; ia <= segAng; ia++) {
         const ang = (ia / segAng) * Math.PI * 2;
@@ -678,28 +662,26 @@ export class WorldRenderer {
         const wz = Math.sin(ang) * r;
 
         const baseH = heightAt(wx, wz);
-        const outerFade = smoothstep(0.04, 0.55, t);
-        const edgeDip = ir === 0 ? -2.2 : 0.0;
+        const outerFade = smoothstep(0.02, 0.55, t);
+        const seamTuck = ir === 0 ? -1.8 : 0.0;
 
-        // Sea-loch channel runs SW-NE across western side; far Ardgour mountains rise beyond x < -650
-        const isOpenLochChannel = wx < -190 && wx > -680 && Math.abs(wz) < 1200;
-        const farWestShore = smoothstep(-580, -1080, wx);
+        // Sea-loch channel sits naturally between x = -180 and x = -850, then Ardgour hills rise cleanly OUT of the water
+        const farWestShore = smoothstep(-740, -1280, wx);
+        const macroPeaks = ridgeNoise2D(wx * 0.00085, wz * 0.00085, 4, 2744) * 320;
+        const subRidges = fbm2D(wx * 0.0022, wz * 0.0022, 3, 3744) * 62;
 
-        const macroPeaks = ridgeNoise2D(wx * 0.00095, wz * 0.00095, 4, 2744) * 285;
-        const subRidges = fbm2D(wx * 0.0022, wz * 0.0022, 3, 3744) * 58;
-
-        let extraH = 0;
-        if (wx < -190) {
-          // Far shore across Loch Linnhe rises dramatically out of the sea loch
-          extraH = (macroPeaks * 0.72 + subRidges * 0.5 + 36) * farWestShore * outerFade;
-          if (isOpenLochChannel) extraH = -8;
+        let wy;
+        if (wx < -220) {
+          // Smooth submerged seabed in the loch rising organically into distant coastal mountains across the water
+          const seaBed = -12.0;
+          const ardgourPeak = (macroPeaks * 0.78 + subRidges * 0.5 + 48) * farWestShore;
+          wy = lerp(baseH, seaBed + ardgourPeak, outerFade) + seamTuck;
         } else {
-          // Ben Nevis & Great Glen Munros ringing North, East, and South
-          const eastBoost = lerp(0.68, 1.15, smoothstep(-190, 900, wx));
-          extraH = (macroPeaks * eastBoost + subRidges + 28) * outerFade;
+          // Towering Ben Nevis & Great Glen Munros framing North, East, and South
+          const eastBoost = lerp(0.72, 1.20, smoothstep(-220, 950, wx));
+          wy = baseH + (macroPeaks * eastBoost + subRidges + 32) * outerFade + seamTuck;
         }
 
-        const wy = baseH + extraH + edgeDip;
         verts.push(wx, wy, wz);
       }
     }
@@ -711,7 +693,8 @@ export class WorldRenderer {
         const b = a + 1;
         const c = (ir + 1) * row + ia;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        // Correct CCW upward-facing triangle winding (ab x ac = +Y) so mountains are solid, never inside-out!
+        indices.push(a, b, c, b, d, c);
       }
     }
 
@@ -726,7 +709,15 @@ export class WorldRenderer {
   }
 
   _buildSector01Landmarks() {
-    const emberMat = new THREE.MeshBasicMaterial({ color: 0xff922e });
+    // HDR glowing ember & candle materials -> radiate warm Turner oil-paint bloom halos!
+    const emberMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(3.6, 1.35, 0.24),
+      toneMapped: false
+    });
+    const winGlowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(2.4, 1.25, 0.38),
+      toneMapped: false
+    });
 
     const cl = LANDMARKS.clachan;
     const bothies = [
@@ -789,10 +780,7 @@ export class WorldRenderer {
       winFrame.position.set(b.w * 0.26, 1.38, b.d * 0.5);
       group.add(winFrame);
 
-      const winGlow = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.66, 0.62),
-        new THREE.MeshBasicMaterial({ color: 0xffae4a })
-      );
+      const winGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.62), winGlowMat);
       winGlow.position.set(b.w * 0.26, 1.38, b.d * 0.5 + 0.09);
       group.add(winGlow);
 
@@ -841,14 +829,14 @@ export class WorldRenderer {
       this.scene.add(log);
     }
 
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.72, 6), emberMat);
-    flame.position.set(cl.x, fireY + 0.48, cl.z);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.78, 6), emberMat);
+    flame.position.set(cl.x, fireY + 0.5, cl.z);
     this.scene.add(flame);
 
-    const hearthLight = new THREE.PointLight(0xff8428, 20, 40, 1.65);
+    const hearthLight = new THREE.PointLight(0xff8428, 22, 42, 1.6);
     hearthLight.position.set(cl.x, fireY + 1.5, cl.z);
     this.scene.add(hearthLight);
-    this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 20, phase: 0.4 });
+    this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 22, phase: 0.4 });
     this.smokeSources.push({ x: cl.x, y: fireY + 0.9, z: cl.z });
 
     // Scottish Stone Tower-House Keep (Torr an Fhaire)
@@ -902,9 +890,9 @@ export class WorldRenderer {
     towerGroup.add(this.towerFlag);
 
     const beaconCoords = [
-      { x: 0, y: 15.8, z: 0, power: 34 },
-      { x: -6.2, y: 2.4, z: 3.4, power: 24 },
-      { x: 6.0, y: 2.2, z: -2.8, power: 24 }
+      { x: 0, y: 15.8, z: 0, power: 38 },
+      { x: -6.2, y: 2.4, z: 3.4, power: 28 },
+      { x: 6.0, y: 2.2, z: -2.8, power: 28 }
     ];
     for (let i = 0; i < beaconCoords.length; i++) {
       const bc = beaconCoords[i];
@@ -912,11 +900,11 @@ export class WorldRenderer {
       stand.position.set(bc.x, bc.y, bc.z);
       towerGroup.add(stand);
 
-      const bFlame = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.1, 6), emberMat);
-      bFlame.position.set(bc.x, bc.y + 0.95, bc.z);
+      const bFlame = new THREE.Mesh(new THREE.ConeGeometry(0.52, 1.25, 6), emberMat);
+      bFlame.position.set(bc.x, bc.y + 1.0, bc.z);
       towerGroup.add(bFlame);
 
-      const bLight = new THREE.PointLight(0xff8424, bc.power, 64, 1.5);
+      const bLight = new THREE.PointLight(0xff8424, bc.power, 72, 1.45);
       bLight.position.set(tw.x + bc.x, twY + bc.y + 1.6, tw.z + bc.z);
       this.scene.add(bLight);
       this.flickerLights.push({ light: bLight, flame: bFlame, baseIntensity: bc.power, phase: i * 2.1 });
@@ -968,8 +956,8 @@ export class WorldRenderer {
 
   _buildInstancedTreesAndRocks() {
     const rng = mulberry32(174401);
-    const maxPines = 580;
-    const maxRocks = 440;
+    const maxPines = 600;
+    const maxRocks = 560;
 
     const trunkGeo = createScotsPineWoodGeometry();
     const crownGeo = createScotsPineCanopyFeatheredGeometry();
@@ -1004,26 +992,25 @@ export class WorldRenderer {
     const color = new THREE.Color();
 
     let pineCount = 0;
-    for (let tries = 0; tries < 3600 && pineCount < maxPines; tries++) {
+    for (let tries = 0; tries < 3800 && pineCount < maxPines; tries++) {
       const x = (rng() - 0.5) * 980;
       const z = (rng() - 0.5) * 980;
       const y = heightAt(x, z);
-      if (y < 2.5 || y > 60) continue;
+      if (y < 2.5 || y > 62) continue;
       if (Math.abs(x - roadCenterX(z)) < 11.5) continue;
       if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 34) continue;
       if (Math.hypot(x - LANDMARKS.watchtower.x, z - LANDMARKS.watchtower.z) < 26) continue;
 
-      // Group Scots pines into organic Caledonian groves rather than uniform orchards
       const grove = fbm2D(x * 0.011, z * 0.011, 3, 9101);
-      if (grove < -0.14 && rng() > 0.15) continue;
+      if (grove < -0.14 && rng() > 0.16) continue;
 
       const n = normalAt(x, z, 1.0);
       if (1 - n.y > 0.27) continue;
 
-      const scale = 0.85 + rng() * 1.15;
+      const scale = 0.92 + rng() * 1.25;
       dummy.position.set(x, y - 0.25, z);
       dummy.rotation.set((rng() - 0.5) * 0.10, rng() * Math.PI * 2, (rng() - 0.5) * 0.10);
-      dummy.scale.set(scale, scale * (0.88 + rng() * 0.36), scale);
+      dummy.scale.set(scale, scale * (0.90 + rng() * 0.36), scale);
       dummy.updateMatrix();
 
       trunks.setMatrixAt(pineCount, dummy.matrix);
@@ -1040,18 +1027,18 @@ export class WorldRenderer {
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
 
     let rockCount = 0;
-    for (let tries = 0; tries < 1800 && rockCount < maxRocks; tries++) {
+    for (let tries = 0; tries < 2200 && rockCount < maxRocks; tries++) {
       const x = (rng() - 0.5) * 980;
       const z = (rng() - 0.5) * 980;
       const y = heightAt(x, z);
       if (y < 0.2) continue;
-      if (Math.abs(x - roadCenterX(z)) < 7.5) continue;
+      if (Math.abs(x - roadCenterX(z)) < 6.5) continue;
       if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 24) continue;
 
-      const sx = 0.7 + rng() * 2.6;
-      const sy = 0.42 + rng() * 1.45;
-      const sz = 0.7 + rng() * 2.6;
-      dummy.position.set(x, y + sy * 0.16, z);
+      const sx = 0.65 + rng() * 2.6;
+      const sy = 0.38 + rng() * 1.45;
+      const sz = 0.65 + rng() * 2.6;
+      dummy.position.set(x, y + sy * 0.14, z);
       dummy.rotation.set(rng() * 0.6, rng() * Math.PI * 2, rng() * 0.6);
       dummy.scale.set(sx, sy, sz);
       dummy.updateMatrix();
@@ -1066,19 +1053,21 @@ export class WorldRenderer {
   }
 
   _buildStreaming3DFoliage() {
-    const grassGeo = create3DGrassClumpGeometry();
-    const heatherGeo = createFeatheredHeatherShrubGeometry();
+    // Soft feathered painterly sedge tufts & lush Highland bell-heather shrubs (zero sharp black spikes!)
+    const grassGeo = createFeatheredTuftGeometry(1.18, 0.64, 3);
+    const heatherGeo = createFeatheredTuftGeometry(1.08, 0.56, 4);
 
     const grassMat = createOnixFoliageMaterial(this.sharedUniforms, {
       kind: 'grass',
-      fadeStart: 42.0,
-      fadeEnd: 84.0
+      map: this.grassTex,
+      fadeStart: 44.0,
+      fadeEnd: 88.0
     });
     const heatherMat = createOnixFoliageMaterial(this.sharedUniforms, {
       kind: 'heather',
       map: this.heatherSprigTex,
-      fadeStart: 44.0,
-      fadeEnd: 86.0
+      fadeStart: 46.0,
+      fadeEnd: 90.0
     });
 
     this.grassInst = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
@@ -1093,9 +1082,8 @@ export class WorldRenderer {
   }
 
   _updateStreamingFoliage(px, pz, camYaw) {
-    // Shift streaming disc 26m ahead along camera gaze -> doubles visible grass distance in front of you!
-    const focusX = px - Math.sin(camYaw) * 26.0;
-    const focusZ = pz - Math.cos(camYaw) * 26.0;
+    const focusX = px - Math.sin(camYaw) * 28.0;
+    const focusZ = pz - Math.cos(camYaw) * 28.0;
 
     if (Math.hypot(focusX - this.lastFoliageX, focusZ - this.lastFoliageZ) < 5.5) return;
     this.lastFoliageX = focusX;
@@ -1132,15 +1120,15 @@ export class WorldRenderer {
         const surf = surfaceAt(wx, wz);
         if (surf.id === 'granite' || surf.id === 'water' || surf.id === 'shingle') continue;
 
-        // Organic sweeping Highland moorland drifts (dense patches + open mossy clearings, zero grid feel)
-        const drift = fbm2D(wx * 0.026, wz * 0.026, 3, 17447);
-        const density = fbm2D(wx * 0.065, wz * 0.065, 2, 17448);
-        if (density < -0.26 && r3 < 0.72) continue;
+        // Sweeping heather drifts & lush golden sedge banks matching the painted ground washes
+        const drift = fbm2D(wx * 0.024, wz * 0.024, 3, 17447);
+        const density = fbm2D(wx * 0.06, wz * 0.06, 2, 17448);
+        if (density < -0.34 && r3 < 0.65) continue;
 
-        const isHeather = surf.id === 'heather' ? drift > -0.18 && r3 > 0.26 : drift > 0.22 && r3 > 0.45;
-        const scale = 0.78 + r1 * 0.82;
+        const isHeather = surf.id === 'heather' ? r3 > 0.28 : (drift > 0.08 && wy > 4.0 && r3 > 0.36);
+        const scale = 0.82 + r1 * 0.86;
 
-        dummy.position.set(wx, wy - 0.05, wz);
+        dummy.position.set(wx, wy - 0.06, wz);
         dummy.rotation.set(0, r2 * Math.PI * 2, 0);
         dummy.scale.set(scale, scale * (0.82 + r3 * 0.44), scale);
         dummy.updateMatrix();
@@ -1148,8 +1136,8 @@ export class WorldRenderer {
         if (isHeather) {
           if (hCount >= MAX_HEATHER) continue;
           this.heatherInst.setMatrixAt(hCount, dummy.matrix);
-          const shade = 0.76 + r2 * 0.38;
-          col.setRGB(shade * 1.02, shade * 0.96, shade * 1.04);
+          const shade = 0.78 + r2 * 0.36;
+          col.setRGB(shade * 1.04, shade * 0.96, shade * 1.05);
           this.heatherInst.setColorAt(hCount, col);
           hCount++;
         } else {
@@ -1369,8 +1357,8 @@ export class WorldRenderer {
   _updateAtmosphere(dt, worldState, px, pz) {
     const wState = worldState.weather?.state || 'clear';
     const targetRain = wState === 'rain' ? 1.0 : 0.0;
-    const targetMist = wState === 'mist' ? 1.55 : wState === 'rain' ? 1.05 : 0.50;
-    const targetStorm = wState === 'rain' ? 0.92 : wState === 'mist' ? 0.58 : 0.22;
+    const targetMist = wState === 'mist' ? 1.55 : wState === 'rain' ? 1.05 : 0.55;
+    const targetStorm = wState === 'rain' ? 0.92 : wState === 'mist' ? 0.58 : 0.28;
 
     const blend = 1 - Math.exp(-1.5 * dt);
     this.sharedUniforms.uRain.value = lerp(this.sharedUniforms.uRain.value, targetRain, blend);
@@ -1380,13 +1368,14 @@ export class WorldRenderer {
     const storm = this.skyUniforms.uStormFactor.value;
     const rain = this.sharedUniforms.uRain.value;
 
+    // 24h Highland Sun Arc (sun sets directly west over Loch Linnhe at ~18:30-19:30!)
     const sunAngle = ((worldState.timeOfDay - 6) / 24) * Math.PI * 2;
     const elev = Math.sin(sunAngle);
     const horiz = Math.cos(sunAngle);
 
-    this.sharedUniforms.uSunDir.value.set(horiz * 0.78, Math.max(elev, -0.25), -0.46).normalize();
+    this.sharedUniforms.uSunDir.value.set(horiz * 0.85, Math.max(elev, -0.25), -0.40).normalize();
     const dayFactor = clamp((elev + 0.08) / 0.42, 0, 1);
-    const goldenFactor = clamp(1 - Math.abs(elev - 0.16) / 0.30, 0, 1);
+    const goldenFactor = clamp(1 - Math.abs(elev - 0.16) / 0.32, 0, 1);
 
     this.sharedUniforms.uDayFactor.value = dayFactor;
     this.skyUniforms.uGoldenFactor.value = goldenFactor;
@@ -1399,25 +1388,25 @@ export class WorldRenderer {
     this.sunLight.target.position.set(snapX, 0, snapZ);
     this.sunLight.target.updateMatrixWorld();
 
-    // Balanced fog density so 2.4 km Lochaber Munros read as sweeping layered Turner washes
+    // Sync Turner valley fog color so 2.6 km Lochaber & Ardgour peaks layer into golden-slate oil washes
     const fogNight = new THREE.Color(0x091220);
-    const fogDay = new THREE.Color(0x6e8394).lerp(new THREE.Color(0x4b5762), storm);
-    const fogGold = new THREE.Color(0xc47d46);
-    this.scene.fog.color.copy(fogNight).lerp(fogDay, dayFactor).lerp(fogGold, goldenFactor * 0.58 * (1 - storm * 0.7));
-    this.scene.fog.density = lerp(0.00115, 0.0034, clamp((targetMist - 0.45) / 1.1, 0, 1));
+    const fogDay = new THREE.Color(0x6b8092).lerp(new THREE.Color(0x47525e), storm);
+    const fogGold = new THREE.Color(0xd28444);
+    this.scene.fog.color.copy(fogNight).lerp(fogDay, dayFactor).lerp(fogGold, goldenFactor * 0.62 * (1 - storm * 0.68));
+    this.scene.fog.density = lerp(0.00088, 0.0030, clamp((targetMist - 0.50) / 1.05, 0, 1));
 
-    const sunHex = elev > 0.02 ? (goldenFactor > 0.25 ? 0xffb66a : 0xffe8c6) : 0x7c9ec8;
+    const sunHex = elev > 0.02 ? (goldenFactor > 0.22 ? 0xffb362 : 0xffe8c6) : 0x7c9ec8;
     this.sunLight.color.setHex(sunHex);
     this.sharedUniforms.uSunColor.value.setHex(sunHex);
 
-    const sunMult = 1 - storm * 0.60;
-    this.sunLight.intensity = elev > 0.02 ? lerp(0.55, 3.35, dayFactor) * sunMult : 0.34;
-    this.hemiLight.intensity = lerp(0.18, 0.64, dayFactor) * lerp(1.0, 0.78, storm);
-    this.scene.environmentIntensity = lerp(0.24, 0.86, dayFactor) * lerp(1.0, 0.72, storm);
+    const sunMult = 1 - storm * 0.56;
+    this.sunLight.intensity = elev > 0.02 ? lerp(0.65, 3.45, dayFactor) * sunMult : 0.34;
+    this.hemiLight.intensity = lerp(0.18, 0.62, dayFactor) * lerp(1.0, 0.78, storm);
+    this.scene.environmentIntensity = lerp(0.24, 0.88, dayFactor) * lerp(1.0, 0.72, storm);
 
     for (const f of this.flickerLights) {
       const pulse = 0.88 + Math.sin(this.elapsed * 9.5 + f.phase) * 0.1 + Math.sin(this.elapsed * 21 + f.phase) * 0.06;
-      const nightBoost = lerp(1.9, 0.88, dayFactor);
+      const nightBoost = lerp(2.0, 0.95, dayFactor);
       f.light.intensity = f.baseIntensity * pulse * nightBoost;
       f.flame.scale.set(1, pulse, 1);
     }
@@ -1531,7 +1520,11 @@ export class WorldRenderer {
   }
 
   render() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.post) {
+      this.post.render(this.scene, this.camera);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   resize() {
@@ -1539,5 +1532,6 @@ export class WorldRenderer {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.post?.resize(window.innerWidth, window.innerHeight);
   }
 }
