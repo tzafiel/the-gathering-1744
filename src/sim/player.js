@@ -21,26 +21,31 @@ export class PlayerController {
     this.wetness = p.wetness ?? 0.0;
     this.crouchBlend = 0;
     this.stridePhase = 0;
+    this.lastStepSlot = 0;
     this.speed = 0;
     this.stance = 'STANDING';
     this.surface = surfaceAt(this.x, this.z);
+    this.events = [];
+  }
+
+  consumeEvents() {
+    if (this.events.length === 0) return [];
+    const out = this.events;
+    this.events = [];
+    return out;
   }
 
   update(dt, input) {
-    // Camera orbit
     this.camYaw -= input.lookX;
     this.camPitch = clamp(this.camPitch + input.lookY, -0.35, 1.05);
     if (input.zoomDelta !== 0) {
       this.camDistance = clamp(this.camDistance + input.zoomDelta * 0.45, 3.2, 9.0);
     }
 
-    // Surface & slope queries
     this.surface = surfaceAt(this.x, this.z);
-    const groundY = heightAt(this.x, this.z);
     const n = normalAt(this.x, this.z, 0.7);
     const slope = 1 - n.y;
 
-    // Camera-relative movement direction
     const forwardX = -Math.sin(this.camYaw);
     const forwardZ = -Math.cos(this.camYaw);
     const rightX = Math.cos(this.camYaw);
@@ -52,9 +57,8 @@ export class PlayerController {
     const dirX = wishMag > 0.001 ? wishX / wishMag : 0;
     const dirZ = wishMag > 0.001 ? wishZ / wishMag : 0;
 
-    // Stance & stamina economics (RDR2-style weight, zero arcade zoom)
     const canSprint = input.sprint && !input.crouch && wishMag > 0.25 && this.stamina > 0.06 && this.surface.id !== 'water';
-    let baseSpeed = 4.3; // brisk Highland stride
+    let baseSpeed = 4.3;
     if (input.crouch) {
       baseSpeed = 2.15;
       this.stance = wishMag > 0.1 ? 'STALKING' : 'CROUCHED';
@@ -67,31 +71,26 @@ export class PlayerController {
       this.stance = 'STANDING';
     }
 
-    // Uphill drag & terrain speed multipliers
-    const moveDotSlope = -(dirX * n.x + dirZ * n.z); // > 0 when climbing uphill
+    const moveDotSlope = -(dirX * n.x + dirZ * n.z);
     const uphillPenalty = moveDotSlope > 0 ? 1 - clamp(moveDotSlope * 1.15, 0, 0.55) : 1.0;
     const targetSpeed = baseSpeed * this.surface.speedMult * uphillPenalty * wishMag;
 
-    // Physical acceleration / deceleration inertia scaled by surface traction
     const accelRate = (wishMag > 0.05 ? 7.5 : 10.5) * this.surface.traction;
     const blend = 1 - Math.exp(-accelRate * dt);
     this.vx = lerp(this.vx, dirX * targetSpeed, blend);
     this.vz = lerp(this.vz, dirZ * targetSpeed, blend);
 
-    // Jump
     if (input.jump && this.grounded && this.stamina > 0.14 && this.surface.id !== 'water') {
       this.vy = 5.6;
       this.grounded = false;
       this.stamina = clamp(this.stamina - 0.12, 0, 1);
     }
 
-    // Gravity & horizontal integration
     this.vy -= 16.5 * dt;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
     this.y += this.vy * dt;
 
-    // Prevent walking into deep sea-loch water (wading stops at chest depth)
     const nextGroundY = heightAt(this.x, this.z);
     if (nextGroundY < WATER_LEVEL - 1.15) {
       this.x -= this.vx * dt;
@@ -106,14 +105,12 @@ export class PlayerController {
       this.vy = 0;
       this.grounded = true;
     } else if (this.grounded && this.y - finalGroundY < 0.65) {
-      // Stick smoothly to downhill slopes without hopping
       this.y = finalGroundY;
       this.vy = 0;
     } else {
       this.grounded = false;
     }
 
-    // Smooth character body rotation toward travel vector
     this.speed = Math.hypot(this.vx, this.vz);
     if (this.speed > 0.35) {
       const targetYaw = Math.atan2(-this.vx, -this.vz);
@@ -122,18 +119,25 @@ export class PlayerController {
       while (diff < -Math.PI) diff += Math.PI * 2;
       this.facingYaw += diff * (1 - Math.exp(-9.0 * dt));
       this.stridePhase += this.speed * dt * (input.crouch ? 2.4 : 1.75);
+
+      if (this.grounded && this.speed > 0.65) {
+        const slot = Math.floor(this.stridePhase / Math.PI);
+        if (slot !== this.lastStepSlot) {
+          this.lastStepSlot = slot;
+          const intensity = input.crouch ? 0.32 : clamp(this.speed / 6.8, 0.45, 1.0);
+          this.events.push({ type: 'step', surfaceId: this.surface.id, intensity });
+        }
+      }
     }
 
-    // Stamina drain / recovery
     if (canSprint) {
-      const drain = 0.15 + (slope * 0.45) + (this.surface.id === 'peat_bog' ? 0.12 : 0);
+      const drain = 0.15 + slope * 0.45 + (this.surface.id === 'peat_bog' ? 0.12 : 0);
       this.stamina = clamp(this.stamina - drain * dt, 0, 1);
     } else {
       const regen = wishMag < 0.1 ? 0.24 : 0.11;
       this.stamina = clamp(this.stamina + regen * dt, 0, 1);
     }
 
-    // Wetness from wading in Loch Linnhe or peat bogs; slowly dries in sun
     if (this.y < WATER_LEVEL + 0.05) {
       this.wetness = clamp(this.wetness + 0.35 * dt, 0, 1);
     } else if (this.surface.id === 'peat_bog' && this.speed > 0.5) {
