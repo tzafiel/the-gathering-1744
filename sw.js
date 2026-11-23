@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gathering-1744-v1';
+const CACHE_NAME = 'gathering-1744-v2';
 
 const APP_SHELL = [
   './',
@@ -44,7 +44,6 @@ self.addEventListener('fetch', (event) => {
 
   if (!isSameOrigin && !isCdn) return;
 
-  // Cache-first for pinned CDN packages (Three.js r187), network-first for local dev updates
   if (isCdn) {
     event.respondWith(
       caches.match(request).then((cached) => {
