@@ -81,12 +81,11 @@ vec3 oxVoronoi2(vec2 x) {
   return vec3(sqrt(md), edge, id);
 }
 
-// World-anchored, translation-invariant oil brushstrokes (ZERO swimming, ZERO origin stretching)
+// World-anchored, translation-invariant oil brushstrokes
 vec3 oxOilBrush(vec2 p, float scale) {
   vec2 warp = vec2(oxFbm2(p * 0.16 + vec2(1.3, 4.1)), oxFbm2(p * 0.16 + vec2(7.7, 2.5))) - 0.5;
   vec2 wp = p + warp * 1.4;
 
-  // Two fixed painterly stroke axes blended seamlessly by organic noise
   mat2 r1 = mat2(0.866, 0.500, -0.500, 0.866);
   mat2 r2 = mat2(-0.342, 0.940, -0.940, -0.342);
   vec2 st1 = (r1 * wp) * vec2(0.45, 1.45) * scale;
@@ -103,29 +102,27 @@ vec3 oxOilBrush(vec2 p, float scale) {
   return vec3(id, ridge, edge);
 }
 
-// Exact match to General Wade's Road spline in src/world/terrain.js
 float oxRoadCenterX(float z) {
   return 88.0 + sin(z * 0.0042) * 46.0 + cos(z * 0.0095) * 18.0;
 }
 `;
 
-// Scoped Turner Atmospheric Oil Wash (wrapped in {} to prevent any variable name collision)
+// Scoped Turner Atmospheric Oil Wash (softens distant ridges without washing out 2km Munros)
 const OX_PAINTERLY_FOG_GLSL = /* glsl */ `
 #ifdef USE_FOG
   {
-    float oxHeightMist = exp(-max(vOxWorldPos.y - 2.0, 0.0) * 0.048) * uMistStrength;
-    float oxFogD = fogDensity * (1.0 + oxHeightMist * 2.5);
+    float oxHeightMist = exp(-max(vOxWorldPos.y - 2.0, 0.0) * 0.045) * uMistStrength;
+    float oxFogD = fogDensity * (1.0 + oxHeightMist * 2.2);
     float oxFogFactor = 1.0 - exp(-oxFogD * oxFogD * vFogDepth * vFogDepth);
 
     vec3 oxFogViewW = normalize(vOxWorldPos - cameraPosition);
     float oxSunScatter = pow(max(dot(oxFogViewW, normalize(uSunDir)), 0.0), 4.0);
-    vec3 oxMistTint = mix(fogColor, uSunColor * 1.05, oxSunScatter * 0.58 * uDayFactor);
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, oxMistTint, clamp(oxFogFactor, 0.0, 0.96));
+    vec3 oxMistTint = mix(fogColor, uSunColor * 1.04, oxSunScatter * 0.56 * uDayFactor);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, oxMistTint, clamp(oxFogFactor, 0.0, 0.94));
   }
 #endif
 `;
 
-// Scoped Chiaroscuro Shadow Tinting
 const OX_CHIAROSCURO_AO_GLSL = /* glsl */ `
 #include <aomap_fragment>
   {
@@ -161,7 +158,7 @@ function injectWorldVaryings(shader, includeUv = false) {
     );
 }
 
-// 1. Romantic Oil-Painting Highland Terrain Shader (Rock-Solid Grounded Brushwork + Puddles)
+// 1. Romantic Oil-Painting Highland Terrain Shader (Seamless Horizon Blending)
 export function createOnixTerrainMaterial(sharedUniforms) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -169,7 +166,7 @@ export function createOnixTerrainMaterial(sharedUniforms) {
     metalness: 0.02
   });
 
-  mat.customProgramCacheKey = () => 'onix-oil-terrain-v3';
+  mat.customProgramCacheKey = () => 'onix-oil-terrain-v4';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader);
@@ -187,15 +184,13 @@ export function createOnixTerrainMaterial(sharedUniforms) {
           vec3 brushFine = oxOilBrush(p + vec2(3.7, 1.9), 1.75);
           float impasto = brushBroad.y * 0.55 + brushFine.y * 0.45;
 
-          // Bold chiseled granite crag facets
           vec3 crag = oxVoronoi2(p * 0.44 + oxFbm2(p * 0.28) * 0.72);
           float cragH = smoothstep(0.0, 0.16, crag.y) * 0.85 + brushFine.y * 0.18;
 
-          // Crushed gravel & wheel ruts on General Wade's Road
           vec3 gravel = oxVoronoi2(p * 2.8);
           float roadH = smoothstep(0.0, 0.2, gravel.y) * 0.5 + brushFine.y * 0.35;
 
-          float h = impasto * 0.52;
+          float h = impasto * 0.50;
           h = mix(h, cragH * 1.25, rockW);
           h = mix(h, roadH * 0.65, roadW);
           h = mix(h, (1.0 - oxVoronoi2(p * 1.8).x) * 0.85, shingleW);
@@ -211,13 +206,11 @@ export function createOnixTerrainMaterial(sharedUniforms) {
         float oxY = oxWPos.y;
         float oxSlope = 1.0 - clamp(oxWN.y, 0.0, 1.0);
 
-        // Static ONIX morphogenesis domains (R) + live moisture (A)
         vec4 oxF1 = texture2D(uOnixField, oxXZ * 0.011);
         vec4 oxF2 = texture2D(uOnixField, oxXZ * 0.035 + vec2(0.37, 0.61));
         float oxPsi = clamp(oxF1.r * 0.66 + oxF2.r * 0.34, 0.0, 1.0);
         float oxFieldWet = oxF1.a;
 
-        // World-anchored broad & fine oil brushstrokes (zero movement!)
         vec3 oxBrushB = oxOilBrush(oxXZ, 0.55);
         vec3 oxBrushF = oxOilBrush(oxXZ + vec2(3.7, 1.9), 1.75);
         float oxDabTone = mix(0.84, 1.18, oxBrushB.x * 0.6 + oxBrushF.x * 0.4);
@@ -225,38 +218,39 @@ export function createOnixTerrainMaterial(sharedUniforms) {
         float oxMacro = oxFbm2(oxXZ * 0.016);
         float oxMed = oxFbm2(oxXZ * 0.10);
 
-        // Geomorphological strata masks
+        // Sweeping heather drift patches that carry visually all the way into distant hills
+        float oxDrift = oxFbm2(oxXZ * 0.026 + vec2(4.1, -2.3));
+
         float oxShingleW = 1.0 - smoothstep(0.15, 2.2, oxY);
         float oxRoadDist = abs(oxXZ.x - oxRoadCenterX(oxXZ.y));
         float oxRoadW = (1.0 - smoothstep(3.2, 5.4, oxRoadDist)) * smoothstep(1.5, 2.8, oxY);
-        float oxRockW = smoothstep(0.15, 0.32, oxSlope + (oxMacro - 0.5) * 0.14) + smoothstep(46.0, 72.0, oxY) * 0.8;
+        float oxRockW = smoothstep(0.15, 0.32, oxSlope + (oxMacro - 0.5) * 0.14) + smoothstep(46.0, 74.0, oxY) * 0.82;
         oxRockW = clamp(oxRockW * (1.0 - oxRoadW * 0.85), 0.0, 1.0);
 
         float oxPeatW = clamp(smoothstep(0.46, 0.74, oxFieldWet + (1.0 - smoothstep(2.0, 15.0, oxY)) * 0.22 - oxSlope * 1.4), 0.0, 1.0);
         oxPeatW *= (1.0 - oxRockW) * (1.0 - oxRoadW) * (1.0 - oxShingleW);
 
-        float oxHeatherW = clamp(smoothstep(0.36, 0.64, oxPsi * 0.65 + oxMacro * 0.55) * smoothstep(4.5, 16.0, oxY), 0.0, 1.0);
+        float oxHeatherW = clamp(smoothstep(0.36, 0.66, oxDrift * 0.55 + oxPsi * 0.45) * smoothstep(3.5, 14.0, oxY), 0.0, 1.0);
         oxHeatherW *= (1.0 - oxRockW) * (1.0 - oxRoadW) * (1.0 - oxShingleW);
 
-        // Muddy wagon ruts along General Wade's Road
         float oxRut1 = exp(-pow((oxRoadDist - 1.1) * 2.6, 2.0));
         float oxRut2 = exp(-pow((oxRoadDist - 2.3) * 2.4, 2.0));
         float oxRutMask = clamp((oxRut1 + oxRut2 * 0.75) * oxRoadW, 0.0, 1.0);
 
-        // Rich 1744 Romantic Oil-Painting Earth Pigments
-        vec3 colMoss = mix(vec3(0.038, 0.068, 0.024), vec3(0.105, 0.120, 0.038), oxMed * 0.65 + oxBrushB.x * 0.35);
-        colMoss = mix(colMoss, vec3(0.162, 0.120, 0.044), smoothstep(0.54, 0.86, oxMed + oxBrushF.x * 0.22) * 0.54);
+        // Deep, cohesive Romantic oil pigments matching our 3D grass & heather roots seamlessly
+        vec3 colMoss = mix(vec3(0.036, 0.064, 0.022), vec3(0.098, 0.114, 0.036), oxMed * 0.65 + oxBrushB.x * 0.35);
+        colMoss = mix(colMoss, vec3(0.156, 0.118, 0.042), smoothstep(0.52, 0.84, oxMed + oxBrushF.x * 0.22) * 0.55);
 
-        vec3 colHeatherBase = mix(vec3(0.042, 0.032, 0.026), vec3(0.056, 0.062, 0.032), oxBrushB.x);
-        float oxBloomDab = smoothstep(0.42, 0.84, oxBrushF.x * 0.65 + oxNoise2(oxXZ * 3.8) * 0.35);
-        vec3 colHeather = mix(colHeatherBase, vec3(0.165, 0.048, 0.108), oxBloomDab * 0.82);
+        vec3 colHeatherBase = mix(vec3(0.038, 0.034, 0.024), vec3(0.056, 0.062, 0.030), oxBrushB.x);
+        float oxBloomDab = smoothstep(0.36, 0.82, oxBrushF.x * 0.62 + oxNoise2(oxXZ * 2.8) * 0.38);
+        vec3 colHeather = mix(colHeatherBase, vec3(0.168, 0.048, 0.112), oxBloomDab * 0.84);
 
-        vec3 colPeat = mix(vec3(0.026, 0.019, 0.014), vec3(0.062, 0.044, 0.028), oxBrushB.x);
+        vec3 colPeat = mix(vec3(0.025, 0.018, 0.013), vec3(0.058, 0.042, 0.026), oxBrushB.x);
 
         vec3 oxCrag = oxVoronoi2(oxXZ * 0.44 + oxMed * 0.72);
         float oxCrack = 1.0 - smoothstep(0.0, 0.12, oxCrag.y);
-        vec3 colGranite = mix(vec3(0.056, 0.068, 0.082), vec3(0.145, 0.135, 0.122), oxCrag.z * 0.7 + oxBrushB.x * 0.3);
-        colGranite = mix(colGranite, vec3(0.095, 0.118, 0.058), smoothstep(0.60, 0.86, oxPsi * 1.25) * (1.0 - oxCrack) * 0.55);
+        vec3 colGranite = mix(vec3(0.056, 0.068, 0.082), vec3(0.142, 0.132, 0.118), oxCrag.z * 0.7 + oxBrushB.x * 0.3);
+        colGranite = mix(colGranite, vec3(0.092, 0.114, 0.055), smoothstep(0.60, 0.86, oxPsi * 1.25) * (1.0 - oxCrack) * 0.55);
         colGranite *= mix(1.0, 0.24, oxCrack);
 
         vec3 colRoad = mix(vec3(0.115, 0.094, 0.064), vec3(0.175, 0.142, 0.098), oxBrushF.x);
@@ -278,7 +272,7 @@ export function createOnixTerrainMaterial(sharedUniforms) {
         float oxWet = clamp(max(oxShoreWet, max(uRain * 0.85, oxPuddle)), 0.0, 1.0);
         oxAlbedo *= mix(1.0, 0.44, oxWet);
 
-        // Refined painterly surface relief (subtle on turf, bold on granite crags)
+        // Distance-softened micro-relief + gentle dappled canopy/cloud shadow variation across distant glens
         float oxCamDist = length(oxWPos - cameraPosition);
         float oxDetailFade = 1.0 - smoothstep(26.0, 115.0, oxCamDist);
         float oxEps = 0.10;
@@ -286,7 +280,11 @@ export function createOnixTerrainMaterial(sharedUniforms) {
         float oxHX = oxPainterlyRelief(oxXZ + vec2(oxEps, 0.0), oxRockW, oxRoadW, oxShingleW);
         float oxHZ = oxPainterlyRelief(oxXZ + vec2(0.0, oxEps), oxRockW, oxRoadW, oxShingleW);
 
-        float oxBaseRelief = mix(0.16, 0.40, oxRockW + oxRoadW * 0.45);
+        // Subtle drifting cloud-shadow bands sweeping across the distant hills like real Scotland
+        float oxCloudShadow = smoothstep(0.42, 0.78, oxFbm2(oxXZ * 0.0028 + vec2(uTime * 0.012, uTime * 0.005)));
+        oxAlbedo *= mix(1.0, 0.68, oxCloudShadow * 0.65 * uDayFactor);
+
+        float oxBaseRelief = mix(0.14, 0.40, oxRockW + oxRoadW * 0.45);
         float oxBumpStr = mix(oxBaseRelief, 0.02, oxPuddle) * oxDetailFade;
         vec3 oxNormalPerturb = vec3((oxH0 - oxHX) / oxEps, 0.0, (oxH0 - oxHZ) / oxEps) * oxBumpStr;
 
@@ -310,7 +308,61 @@ export function createOnixTerrainMaterial(sharedUniforms) {
   return mat;
 }
 
-// 2. Painterly Highland Castle, Watchtower & Dry-Stone Masonry Shader
+// 2. Distant Lochaber Munro Horizon Ring Shader (Broad Painterly Mountain Washes out to 2.4 km)
+export function createOnixHorizonMaterial(sharedUniforms) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.94,
+    metalness: 0.0
+  });
+
+  mat.customProgramCacheKey = () => 'onix-oil-horizon-v4';
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, sharedUniforms);
+    injectWorldVaryings(shader);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vOxWorldPos;
+        varying vec3 vOxWorldNorm;
+        ${OX_COMMON_GLSL}`
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        vec3 oxWN = normalize(vOxWorldNorm);
+        vec2 oxXZ = vOxWorldPos.xz;
+        float oxY = vOxWorldPos.y;
+        float oxSlope = 1.0 - clamp(oxWN.y, 0.0, 1.0);
+
+        float mNoise = oxFbm2(oxXZ * 0.0035);
+        float heatherBand = smoothstep(10.0, 75.0, oxY) * (1.0 - smoothstep(110.0, 185.0, oxY));
+        float cragMask = smoothstep(0.18, 0.42, oxSlope + (mNoise - 0.5) * 0.25) + smoothstep(130.0, 220.0, oxY);
+
+        vec3 baseGrass = vec3(0.048, 0.072, 0.032);
+        vec3 baseHeather = vec3(0.095, 0.048, 0.076);
+        vec3 basePeak = vec3(0.068, 0.078, 0.096);
+
+        vec3 oxCol = mix(baseGrass, baseHeather, clamp(heatherBand * (0.45 + mNoise * 0.7), 0.0, 1.0));
+        oxCol = mix(oxCol, basePeak, clamp(cragMask, 0.0, 1.0));
+
+        // Drifting cloud shadows across distant Munros
+        float cloudSh = smoothstep(0.40, 0.78, oxFbm2(oxXZ * 0.0022 + vec2(uTime * 0.012, uTime * 0.005)));
+        oxCol *= mix(1.0, 0.58, cloudSh * 0.7 * uDayFactor);
+
+        float oxAO = 0.85;
+        diffuseColor.rgb = oxCol;`
+      )
+      .replace('#include <aomap_fragment>', OX_CHIAROSCURO_AO_GLSL)
+      .replace('#include <fog_fragment>', OX_PAINTERLY_FOG_GLSL);
+  };
+
+  return mat;
+}
+
+// 3. Painterly Highland Castle, Watchtower & Dry-Stone Masonry Shader
 export function createOnixStoneMaterial(sharedUniforms, { coursed = true, tint = 0xffffff } = {}) {
   const mat = new THREE.MeshStandardMaterial({
     color: tint,
@@ -318,7 +370,7 @@ export function createOnixStoneMaterial(sharedUniforms, { coursed = true, tint =
     metalness: 0.04
   });
 
-  mat.customProgramCacheKey = () => (coursed ? 'onix-oil-stone-v3' : 'onix-oil-boulder-v3');
+  mat.customProgramCacheKey = () => (coursed ? 'onix-oil-stone-v4' : 'onix-oil-boulder-v4');
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader);
@@ -400,14 +452,14 @@ export function createOnixStoneMaterial(sharedUniforms, { coursed = true, tint =
   return mat;
 }
 
-// 3. Painterly Heather-Thatch & Mossy Turf Roof Shader
+// 4. Painterly Heather-Thatch & Mossy Turf Roof Shader
 export function createOnixThatchMaterial(sharedUniforms) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.94,
     metalness: 0.0
   });
-  mat.customProgramCacheKey = () => 'onix-oil-thatch-v3';
+  mat.customProgramCacheKey = () => 'onix-oil-thatch-v4';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader);
@@ -449,14 +501,14 @@ export function createOnixThatchMaterial(sharedUniforms) {
   return mat;
 }
 
-// 4. Painterly Scots Pine Bark & Weathered Timber Shader
+// 5. Painterly Scots Pine Bark & Weathered Timber Shader
 export function createOnixBarkMaterial(sharedUniforms) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.92,
     metalness: 0.0
   });
-  mat.customProgramCacheKey = () => 'onix-oil-bark-v3';
+  mat.customProgramCacheKey = () => 'onix-oil-bark-v4';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader);
@@ -479,8 +531,8 @@ export function createOnixBarkMaterial(sharedUniforms) {
         vec3 brush = oxOilBrush(bp, 1.3);
         float fissure = 1.0 - smoothstep(0.0, 0.14, vor.y);
 
-        vec3 barkLow = vec3(0.052, 0.034, 0.022);
-        vec3 barkHigh = vec3(0.142, 0.070, 0.036);
+        vec3 barkLow = vec3(0.050, 0.034, 0.022);
+        vec3 barkHigh = vec3(0.148, 0.072, 0.038);
         vec3 oxCol = mix(barkLow, barkHigh, smoothstep(1.5, 6.2, oxWP.y - 3.5) * 0.65 + brush.x * 0.35);
         oxCol = mix(oxCol, vec3(0.015, 0.012, 0.011), fissure * 0.86);
         oxCol *= mix(1.0, 0.56, uRain);
@@ -500,20 +552,29 @@ export function createOnixBarkMaterial(sharedUniforms) {
   return mat;
 }
 
-// 5. Painterly 3D Wind-Coupled Foliage (3D Grass, Woody Heather Cushions, 3D Scots Pine Boughs)
-export function createOnixFoliageMaterial(sharedUniforms, kind = 'grass') {
+// 6. Feathered Painterly Foliage Shader (Distance Height-Sink Fade + ONIX Wind + Spherical Lighting)
+export function createOnixFoliageMaterial(
+  sharedUniforms,
+  { kind = 'grass', map = null, fadeStart = 44.0, fadeEnd = 86.0 } = {}
+) {
   const isPine = kind === 'pine';
+  const hasFade = !isPine && fadeEnd < 500.0;
+
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
+    map: map || null,
+    alphaTest: map ? 0.34 : 0.0,
     vertexColors: true,
-    roughness: isPine ? 0.84 : 0.74,
+    roughness: isPine ? 0.84 : 0.78,
     metalness: 0.0,
-    side: isPine ? THREE.FrontSide : THREE.DoubleSide
+    side: THREE.DoubleSide
   });
 
-  mat.customProgramCacheKey = () => `onix-oil-foliage-${kind}-v3`;
+  mat.customProgramCacheKey = () => `onix-oil-foliage-${kind}-${map ? 'tex' : 'mesh'}-v4`;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
+    shader.uniforms.uFadeStart = { value: fadeStart };
+    shader.uniforms.uFadeEnd = { value: fadeEnd };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -522,6 +583,8 @@ export function createOnixFoliageMaterial(sharedUniforms, kind = 'grass') {
         uniform sampler2D uOnixField;
         uniform float uTime;
         uniform float uRain;
+        uniform float uFadeStart;
+        uniform float uFadeEnd;
         varying vec3 vOxWorldPos;
         varying vec3 vOxWorldNorm;
         varying float vOxTip;`
@@ -529,16 +592,27 @@ export function createOnixFoliageMaterial(sharedUniforms, kind = 'grass') {
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        vOxTip = clamp(position.y * ${isPine ? '0.16' : '1.45'}, 0.0, 1.0);
+        vOxTip = ${isPine ? 'clamp((position.y - 3.6) / 4.4, 0.0, 1.0)' : 'clamp(position.y * 1.45, 0.0, 1.0)'};
         #ifdef USE_INSTANCING
           vec4 oxRoot = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          ${
+            hasFade
+              ? `
+          // Smooth RDR2-style height-sink into the hillside so no hard grass ring ever appears
+          float oxDistCam = length(oxRoot.xz - cameraPosition.xz);
+          float oxSink = 1.0 - smoothstep(uFadeStart, uFadeEnd, oxDistCam);
+          transformed.y *= oxSink;
+          transformed.xz *= mix(0.65, 1.0, oxSink);`
+              : ''
+          }
+          // Live ONIX chiral LLG wind eddies bending reeds, heather sprigs, and pine crowns
           vec4 oxFld = texture2D(uOnixField, oxRoot.xz * 0.015 + vec2(uTime * 0.011, uTime * 0.005));
-          vec2 oxWind = (oxFld.gb * 2.0 - 1.0) * (1.0 + uRain * 0.85);
-          float oxGust = 0.65 + 0.35 * sin(uTime * 2.3 + oxRoot.x * 0.21 + oxRoot.z * 0.17);
-          float oxBend = vOxTip * vOxTip * ${isPine ? '0.15' : kind === 'heather' ? '0.12' : '0.32'} * oxGust;
+          vec2 oxWind = (oxFld.gb * 2.0 - 1.0) * (1.0 + uRain * 0.9);
+          float oxGust = 0.62 + 0.38 * sin(uTime * 2.2 + oxRoot.x * 0.19 + oxRoot.z * 0.15);
+          float oxBend = vOxTip * vOxTip * ${isPine ? '0.18' : kind === 'heather' ? '0.10' : '0.28'} * oxGust;
           transformed.x += oxWind.x * oxBend;
           transformed.z += oxWind.y * oxBend;
-          transformed.y -= abs(oxBend) * 0.16;
+          transformed.y -= abs(oxBend) * 0.14;
         #endif`
       )
       .replace(
@@ -566,32 +640,33 @@ export function createOnixFoliageMaterial(sharedUniforms, kind = 'grass') {
         ${OX_COMMON_GLSL}`
       )
       .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        vec3 oxBrush = oxOilBrush(vOxWorldPos.xz + vOxWorldPos.y * 0.5, ${isPine ? '1.35' : '2.6'});
-        ${
-          isPine
-            ? `
-        vec3 pineDark = vec3(0.018, 0.038, 0.024);
-        vec3 pineLit = vec3(0.078, 0.118, 0.048);
-        diffuseColor.rgb *= mix(pineDark, pineLit, clamp(vOxTip * 0.55 + oxBrush.x * 0.45, 0.0, 1.0)) * 2.15;`
-            : `
-        diffuseColor.rgb *= mix(0.76, 1.24, oxBrush.x) * mix(1.0, 0.60, uRain);`
-        }
-        vec3 oxFolViewW = normalize(vOxWorldPos - cameraPosition);
-        float oxBacklit = pow(max(dot(oxFolViewW, normalize(uSunDir)), 0.0), 3.0) * vOxTip * uDayFactor;
-        diffuseColor.rgb += diffuseColor.rgb * uSunColor * oxBacklit * 0.85;
-        float oxAO = mix(0.62, 1.0, vOxTip);
-        float oxRoughF = mix(${isPine ? '0.84' : '0.72'}, 0.26, uRain);`
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        {
+          // Subtle world-space brushstroke modulation + drifting cloud shadows
+          vec3 oxFBrush = oxOilBrush(vOxWorldPos.xz + vOxWorldPos.y * 0.4, ${isPine ? '1.2' : '2.2'});
+          float oxFCloud = smoothstep(0.42, 0.78, oxFbm2(vOxWorldPos.xz * 0.0028 + vec2(uTime * 0.012, uTime * 0.005)));
+          diffuseColor.rgb *= mix(0.84, 1.18, oxFBrush.x) * mix(1.0, 0.62, uRain);
+          diffuseColor.rgb *= mix(1.0, 0.68, oxFCloud * 0.65 * uDayFactor);
+
+          // Golden Romantic backlighting when looking toward the Atlantic sun
+          vec3 oxFolViewW = normalize(vOxWorldPos - cameraPosition);
+          float oxBacklit = pow(max(dot(oxFolViewW, normalize(uSunDir)), 0.0), 3.0) * vOxTip * uDayFactor;
+          diffuseColor.rgb += diffuseColor.rgb * uSunColor * oxBacklit * ${isPine ? '0.65' : '0.90'};
+        }`
       )
-      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = oxRoughF;`)
-      .replace('#include <aomap_fragment>', OX_CHIAROSCURO_AO_GLSL)
+      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = mix(${isPine ? '0.84' : '0.76'}, 0.28, uRain);`)
+      .replace(
+        '#include <aomap_fragment>',
+        `float oxAO = mix(${isPine ? '0.52' : '0.78'}, 1.0, vOxTip);
+        ${OX_CHIAROSCURO_AO_GLSL}`
+      )
       .replace('#include <fog_fragment>', OX_PAINTERLY_FOG_GLSL);
   };
   return mat;
 }
 
-// 6. Interactive Painterly Sea-Loch Water Shader (Coupled to Symplectic Ripples + ONIX Currents)
+// 7. Interactive Painterly Sea-Loch Water Shader (Coupled to Symplectic Ripples + ONIX Currents)
 export function createOnixWaterMaterial(sharedUniforms) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0x0c2430,
@@ -602,7 +677,7 @@ export function createOnixWaterMaterial(sharedUniforms) {
     opacity: 0.94
   });
 
-  mat.customProgramCacheKey = () => 'onix-oil-water-v3';
+  mat.customProgramCacheKey = () => 'onix-oil-water-v4';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader);
@@ -638,7 +713,6 @@ export function createOnixWaterMaterial(sharedUniforms) {
         float chop = 0.15 + uRain * 0.16;
         vec2 oxWaveGrad = vec2((w0 - wx) / oxEps * chop, (w0 - wz) / oxEps * chop);
 
-        // Live Interactive Symplectic Ripples & Wakes around Callum's boots
         vec2 ripUV = (oxXZ - uRippleOrigin) / uRippleWorldSize + 0.5;
         float oxWakeFoam = 0.0;
         if (ripUV.x > 0.02 && ripUV.x < 0.98 && ripUV.y > 0.02 && ripUV.y < 0.98) {
@@ -677,14 +751,14 @@ export function createOnixWaterMaterial(sharedUniforms) {
   return mat;
 }
 
-// 7. Painterly Natural-Dyed 1744 Lochaber Wool Plaid Shader
+// 8. Painterly Natural-Dyed 1744 Lochaber Wool Plaid Shader
 export function createOnixPlaidMaterial(sharedUniforms) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.90,
     metalness: 0.0
   });
-  mat.customProgramCacheKey = () => 'onix-oil-plaid-v3';
+  mat.customProgramCacheKey = () => 'onix-oil-plaid-v4';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
     injectWorldVaryings(shader, true);
