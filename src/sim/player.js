@@ -13,8 +13,8 @@ export class PlayerController {
 
     this.facingYaw = p.yaw ?? 0;
     this.camYaw = this.facingYaw;
-    this.camPitch = 0.24;
-    this.camDistance = 5.4;
+    this.camPitch = 0.08; // Level horizon gaze in pure First-Person
+    this.camDistance = 0;
 
     this.grounded = true;
     this.stamina = p.stamina ?? 1.0;
@@ -37,10 +37,8 @@ export class PlayerController {
 
   update(dt, input) {
     this.camYaw -= input.lookX;
-    this.camPitch = clamp(this.camPitch + input.lookY, -0.35, 1.05);
-    if (input.zoomDelta !== 0) {
-      this.camDistance = clamp(this.camDistance + input.zoomDelta * 0.45, 3.2, 9.0);
-    }
+    this.camPitch = clamp(this.camPitch + input.lookY, -1.25, 1.25);
+    this.facingYaw = this.camYaw;
 
     this.surface = surfaceAt(this.x, this.z);
     const n = normalAt(this.x, this.z, 0.7);
@@ -57,8 +55,10 @@ export class PlayerController {
     const dirX = wishMag > 0.001 ? wishX / wishMag : 0;
     const dirZ = wishMag > 0.001 ? wishZ / wishMag : 0;
 
-    const canSprint = input.sprint && !input.crouch && wishMag > 0.25 && this.stamina > 0.06 && this.surface.id !== 'water';
-    let baseSpeed = 4.3;
+    // Slight natural slowdown when backpedaling or sidestepping in melee
+    const backing = input.moveZ > 0.25;
+    const canSprint = input.sprint && !input.crouch && !backing && wishMag > 0.25 && this.stamina > 0.06 && this.surface.id !== 'water';
+    let baseSpeed = backing ? 3.2 : 4.3;
     if (input.crouch) {
       baseSpeed = 2.15;
       this.stance = wishMag > 0.1 ? 'STALKING' : 'CROUCHED';
@@ -75,7 +75,7 @@ export class PlayerController {
     const uphillPenalty = moveDotSlope > 0 ? 1 - clamp(moveDotSlope * 1.15, 0, 0.55) : 1.0;
     const targetSpeed = baseSpeed * this.surface.speedMult * uphillPenalty * wishMag;
 
-    const accelRate = (wishMag > 0.05 ? 7.5 : 10.5) * this.surface.traction;
+    const accelRate = (wishMag > 0.05 ? 8.5 : 11.5) * this.surface.traction;
     const blend = 1 - Math.exp(-accelRate * dt);
     this.vx = lerp(this.vx, dirX * targetSpeed, blend);
     this.vz = lerp(this.vz, dirZ * targetSpeed, blend);
@@ -113,12 +113,7 @@ export class PlayerController {
 
     this.speed = Math.hypot(this.vx, this.vz);
     if (this.speed > 0.35) {
-      const targetYaw = Math.atan2(-this.vx, -this.vz);
-      let diff = targetYaw - this.facingYaw;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      this.facingYaw += diff * (1 - Math.exp(-9.0 * dt));
-      this.stridePhase += this.speed * dt * (input.crouch ? 2.4 : 1.75);
+      this.stridePhase += this.speed * dt * (input.crouch ? 2.4 : 1.8);
 
       if (this.grounded && this.speed > 0.65) {
         const slot = Math.floor(this.stridePhase / Math.PI);
@@ -153,7 +148,7 @@ export class PlayerController {
     worldState.player.x = Number(this.x.toFixed(2));
     worldState.player.y = Number(this.y.toFixed(2));
     worldState.player.z = Number(this.z.toFixed(2));
-    worldState.player.yaw = Number(this.facingYaw.toFixed(3));
+    worldState.player.yaw = Number(this.camYaw.toFixed(3));
     worldState.player.stamina = Number(this.stamina.toFixed(3));
     worldState.player.wetness = Number(this.wetness.toFixed(3));
   }
