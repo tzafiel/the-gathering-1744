@@ -7,9 +7,10 @@ import {
   WATER_LEVEL,
   LANDMARKS
 } from '../world/terrain.js';
-import { mulberry32, hash2D, clamp, lerp } from '../core/prng.js';
+import { mulberry32, hash2D, fbm2D, ridgeNoise2D, clamp, lerp, smoothstep } from '../core/prng.js';
 import {
   createOnixTerrainMaterial,
+  createOnixHorizonMaterial,
   createOnixStoneMaterial,
   createOnixThatchMaterial,
   createOnixBarkMaterial,
@@ -21,11 +22,11 @@ import {
 const CHUNK_SIZE = 120;
 const CHUNK_RADIUS = 4;
 
-// Dense 3D sculpted ground vegetation carpet (zero flat dot cards)
-const FOLIAGE_STEP = 1.45;
-const FOLIAGE_HALF_GRID = 27;
-const MAX_GRASS = 2500;
-const MAX_HEATHER = 1700;
+// Camera-forward foliage carpet: shifts 26m ahead of Callum and fades cleanly out to 86m
+const FOLIAGE_STEP = 1.65;
+const FOLIAGE_HALF_GRID = 38;
+const MAX_GRASS = 3400;
+const MAX_HEATHER = 2200;
 
 function mergeNonIndexedGeos(geos) {
   const parts = geos.map((g) => (g.index ? g.toNonIndexed() : g.clone()));
@@ -58,23 +59,159 @@ function mergeNonIndexedGeos(geos) {
   return out;
 }
 
-// True 3D curved tapered Highland moor-grass clump (11 arching blades, dark peat root -> golden ochre tip)
+// Painterly alpha-feathered Caledonian Scots Pine bough texture (airy sky gaps, zero solid blobs)
+function createPainterlyPineBoughTexture(aniso = 8) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rng = mulberry32(41744);
+  ctx.clearRect(0, 0, size, size);
+
+  const cx = size * 0.5;
+  const cy = size * 0.54;
+
+  // Fine reddish-brown interior Scots pine twigs
+  ctx.strokeStyle = '#3f281b';
+  ctx.lineCap = 'round';
+  for (let b = 0; b < 6; b++) {
+    const a = -Math.PI * 0.92 + (b / 5) * Math.PI * 0.84 + (rng() - 0.5) * 0.25;
+    const len = 58 + rng() * 44;
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + 16);
+    ctx.quadraticCurveTo(cx + Math.cos(a) * len * 0.5, cy + Math.sin(a) * len * 0.35, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+    ctx.stroke();
+  }
+
+  // Clustered radiating painterly pine-needle fans (leaves organic daylight holes between clusters)
+  const clusters = 15;
+  for (let c = 0; c < clusters; c++) {
+    const ang = rng() * Math.PI * 2;
+    const dist = Math.pow(rng(), 0.72) * 74;
+    const kx = cx + Math.cos(ang) * dist;
+    const ky = cy + Math.sin(ang) * dist * 0.78 - 6;
+    const sunBias = clamp(1 - ky / size + (rng() - 0.5) * 0.25, 0, 1);
+
+    for (let n = 0; n < 38; n++) {
+      const na = rng() * Math.PI * 2;
+      const nr = 10 + rng() * 26;
+      const r = Math.round(lerp(22, 64, sunBias) + (rng() - 0.5) * 14);
+      const g = Math.round(lerp(42, 92, sunBias) + (rng() - 0.5) * 18);
+      const b = Math.round(lerp(28, 46, sunBias) + (rng() - 0.5) * 10);
+
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      ctx.lineWidth = 2.0 + rng() * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(kx, ky);
+      ctx.lineTo(kx + Math.cos(na) * nr, ky + Math.sin(na) * nr * 0.82);
+      ctx.stroke();
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(aniso, 8);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Painterly feathery Highland Bell-Heather sprig texture (woody stems + delicate wine/plum floret strokes)
+function createPainterlyHeatherSprigTexture(aniso = 8) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rng = mulberry32(81744);
+  ctx.clearRect(0, 0, size, size);
+
+  // Branching woody heather stems sweeping outward from root
+  const stems = 26;
+  for (let s = 0; s < stems; s++) {
+    const sx = size * (0.20 + rng() * 0.60);
+    const h = size * (0.36 + rng() * 0.52);
+    const lean = (sx - size * 0.5) * 1.05 + (rng() - 0.5) * 58;
+    const ex = clamp(sx + lean, 12, size - 12);
+    const ey = clamp(size - h, 14, size - 20);
+    const mx = (sx + ex) * 0.5 + (rng() - 0.5) * 18;
+    const my = (size + ey) * 0.5;
+
+    // Woody evergreen base stem
+    ctx.strokeStyle = '#333b22';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx, size + 2);
+    ctx.quadraticCurveTo(mx, my, ex, ey);
+    ctx.stroke();
+
+    // Fine olive foliage & feathery painterly heather blossom spikes along upper stem
+    const hasFlower = rng() > 0.24;
+    for (let t = 0.22; t <= 1.0; t += 0.075) {
+      const omt = 1 - t;
+      const px = omt * omt * sx + 2 * omt * t * mx + t * t * ex;
+      const py = omt * omt * size + 2 * omt * t * my + t * t * ey;
+
+      if (hasFlower && t > 0.44) {
+        // Muted Romantic heather wine, dusky plum, and rose-violet oil dabs
+        const r = Math.round(112 + rng() * 62);
+        const g = Math.round(48 + rng() * 34);
+        const b = Math.round(98 + rng() * 58);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.ellipse(
+          px + (rng() - 0.5) * 12,
+          py + (rng() - 0.5) * 8,
+          3.2 + rng() * 4.2,
+          2.2 + rng() * 2.8,
+          rng() * Math.PI,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      } else {
+        // Deep Scottish heather-moss needles blending down into the turf
+        const r = Math.round(46 + rng() * 26);
+        const g = Math.round(68 + rng() * 32);
+        const b = Math.round(30 + rng() * 18);
+        ctx.strokeStyle = `rgb(${r},${g},${b})`;
+        ctx.lineWidth = 2.4;
+        const a = -Math.PI * 0.5 + (rng() - 0.5) * 1.9;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(a) * 11, py + Math.sin(a) * 11);
+        ctx.stroke();
+      }
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(aniso, 8);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Lush 16-blade arching Highland sedge & moor-grass clump with terrain-matched roots (zero dark rug seam!)
 function create3DGrassClumpGeometry() {
   const rng = mulberry32(3041);
-  const blades = 11;
+  const blades = 16;
   const positions = [];
   const normals = [];
   const colors = [];
 
   for (let b = 0; b < blades; b++) {
-    const ang = (b / blades) * Math.PI * 2 + (rng() - 0.5) * 0.45;
-    const rad = 0.04 + rng() * 0.24;
+    const ang = (b / blades) * Math.PI * 2 + (rng() - 0.5) * 0.5;
+    const rad = 0.04 + rng() * 0.34;
     const bx = Math.cos(ang) * rad;
     const bz = Math.sin(ang) * rad;
-    const h = 0.34 + rng() * 0.40;
-    const w0 = 0.044 + rng() * 0.024;
-    const lean = 0.14 + rng() * 0.26;
-    const isDryTip = rng() > 0.48;
+    const isTallReed = rng() > 0.62;
+    const h = isTallReed ? 0.42 + rng() * 0.34 : 0.22 + rng() * 0.24;
+    const w0 = 0.032 + rng() * 0.018;
+    const lean = 0.14 + rng() * 0.28;
+    const isGolden = rng() > 0.42;
 
     const dirX = Math.cos(ang);
     const dirZ = Math.sin(ang);
@@ -83,14 +220,15 @@ function create3DGrassClumpGeometry() {
 
     const p0L = [bx - perpX * w0, 0, bz - perpZ * w0];
     const p0R = [bx + perpX * w0, 0, bz + perpZ * w0];
-    const p1L = [bx + dirX * lean * 0.42 - perpX * w0 * 0.55, h * 0.54, bz + dirZ * lean * 0.42 - perpZ * w0 * 0.55];
-    const p1R = [bx + dirX * lean * 0.42 + perpX * w0 * 0.55, h * 0.54, bz + dirZ * lean * 0.42 + perpZ * w0 * 0.55];
+    const p1L = [bx + dirX * lean * 0.45 - perpX * w0 * 0.5, h * 0.55, bz + dirZ * lean * 0.45 - perpZ * w0 * 0.5];
+    const p1R = [bx + dirX * lean * 0.45 + perpX * w0 * 0.5, h * 0.55, bz + dirZ * lean * 0.45 + perpZ * w0 * 0.5];
     const p2T = [bx + dirX * lean, h, bz + dirZ * lean];
 
-    const cRoot = [0.022, 0.036, 0.015];
-    const cMid = isDryTip ? [0.095, 0.082, 0.032] : [0.052, 0.082, 0.026];
-    const cTip = isDryTip ? [0.195, 0.148, 0.055] : [0.105, 0.128, 0.044];
-    const nUp = [dirX * 0.35, 0.92, dirZ * 0.35];
+    // Terrain-matched warm moss root -> sunlit olive/ochre tip so mid-ground melts cleanly into the hillside
+    const cRoot = [0.052, 0.074, 0.026];
+    const cMid = isGolden ? [0.115, 0.098, 0.038] : [0.072, 0.098, 0.032];
+    const cTip = isGolden ? [0.215, 0.165, 0.062] : [0.122, 0.140, 0.048];
+    const nUp = [dirX * 0.18, 0.98, dirZ * 0.18];
 
     const pushTri = (a, cA, bV, cB, c, cC) => {
       positions.push(...a, ...bV, ...c);
@@ -110,117 +248,151 @@ function create3DGrassClumpGeometry() {
   return geo;
 }
 
-// True 3D gnarled Highland bell-heather shrub cushion (deep wine/plum painterly blossoms over woody stems)
-function create3DHeatherCushionGeometry() {
-  const rng = mulberry32(8819);
-  const parts = [];
-  const subCushions = 5;
+// Feathered painterly heather bush (4 cupped crossed sprig planes with soft spherical upward normals)
+function createFeatheredHeatherShrubGeometry() {
+  const planes = [];
+  const configs = [
+    { rotY: 0.0, tilt: 0.14, w: 0.95, h: 0.56, ox: 0, oz: 0 },
+    { rotY: Math.PI * 0.34, tilt: -0.14, w: 0.92, h: 0.52, ox: 0.06, oz: -0.05 },
+    { rotY: Math.PI * 0.68, tilt: 0.16, w: 0.88, h: 0.50, ox: -0.06, oz: 0.05 },
+    { rotY: Math.PI * 0.18, tilt: 0.38, w: 0.78, h: 0.46, ox: 0.0, oz: 0.08 }
+  ];
 
-  for (let i = 0; i < subCushions; i++) {
-    const ang = (i / subCushions) * Math.PI * 2 + rng() * 0.6;
-    const dist = i === 0 ? 0 : 0.16 + rng() * 0.18;
-    const r = i === 0 ? 0.28 : 0.18 + rng() * 0.10;
-    const g = new THREE.IcosahedronGeometry(r, 1);
+  for (const cfg of configs) {
+    const g = new THREE.PlaneGeometry(cfg.w, cfg.h, 2, 2);
+    g.translate(0, cfg.h * 0.46, 0);
+    g.rotateX(cfg.tilt);
+    g.rotateY(cfg.rotY);
+    g.translate(cfg.ox, 0, cfg.oz);
 
     const pos = g.attributes.position;
+    const norm = g.attributes.normal;
     const cols = new Float32Array(pos.count * 3);
-    const hasBloom = rng() > 0.22;
 
-    for (let v = 0; v < pos.count; v++) {
-      let vx = pos.getX(v);
-      let vy = pos.getY(v);
-      let vz = pos.getZ(v);
+    for (let i = 0; i < pos.count; i++) {
+      const px = pos.getX(i);
+      const py = pos.getY(i);
+      const pz = pos.getZ(i);
 
-      const n = 0.78 + Math.sin(vx * 11 + vy * 7) * 0.14 + Math.cos(vz * 13) * 0.14;
-      vx = vx * n * 1.15 + Math.cos(ang) * dist;
-      vy = Math.max(0.0, (vy + r * 0.65) * 0.72 * n);
-      vz = vz * n * 1.15 + Math.sin(ang) * dist;
-      pos.setXYZ(v, vx, vy, vz);
+      // Transferred upward spherical normal removes flat-card harshness
+      const nx = px * 0.45;
+      const ny = 1.0;
+      const nz = pz * 0.45;
+      const inv = 1 / Math.hypot(nx, ny, nz);
+      norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
 
-      const yNorm = clamp(vy / 0.36, 0, 1);
-      const rC = lerp(0.024, hasBloom ? 0.165 : 0.056, yNorm * yNorm);
-      const gC = lerp(0.030, hasBloom ? 0.048 : 0.076, yNorm);
-      const bC = lerp(0.018, hasBloom ? 0.108 : 0.030, yNorm * yNorm);
-      cols[v * 3] = rC;
-      cols[v * 3 + 1] = gC;
-      cols[v * 3 + 2] = bC;
+      const yNorm = clamp(py / cfg.h, 0, 1);
+      const shade = lerp(0.76, 1.06, yNorm);
+      cols[i * 3] = shade;
+      cols[i * 3 + 1] = shade;
+      cols[i * 3 + 2] = shade;
     }
     g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    g.computeVertexNormals();
-    parts.push(g);
+    planes.push(g);
   }
-  return mergeNonIndexedGeos(parts);
+  return mergeNonIndexedGeos(planes);
 }
 
-// Sculpted windswept Caledonian Scots Pine trunk + structural upper limbs
+// Gnarled asymmetric Caledonian Scots Pine skeleton (crooked trunk + sweeping high umbrella boughs)
+const PINE_BRANCH_TIPS = [
+  { x: 2.05, y: 5.3, z: 0.55, r: 2.35 },
+  { x: -1.75, y: 5.7, z: 1.55, r: 2.25 },
+  { x: -1.85, y: 6.15, z: -1.35, r: 2.30 },
+  { x: 1.35, y: 6.55, z: -1.65, r: 2.15 },
+  { x: 0.25, y: 7.25, z: 0.20, r: 2.55 },
+  { x: -0.65, y: 6.90, z: 0.65, r: 1.95 }
+];
+
 function createScotsPineWoodGeometry() {
   const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.14, 0.38, 6.8, 8, 5);
-  trunk.translate(0, 3.3, 0);
+  const trunk = new THREE.CylinderGeometry(0.13, 0.36, 7.1, 7, 6);
+  trunk.translate(0, 3.45, 0);
   const pos = trunk.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
-    pos.setX(i, pos.getX(i) + Math.sin(y * 0.48) * 0.24);
-    pos.setZ(i, pos.getZ(i) + Math.cos(y * 0.38) * 0.16);
+    pos.setX(i, pos.getX(i) + Math.sin(y * 0.46) * 0.28 + y * 0.04);
+    pos.setZ(i, pos.getZ(i) + Math.cos(y * 0.38) * 0.18);
   }
   trunk.computeVertexNormals();
   parts.push(trunk);
 
-  const branches = [
-    { y: 4.4, ang: 0.3, len: 2.4, tilt: 1.05 },
-    { y: 5.0, ang: 2.1, len: 2.2, tilt: 0.96 },
-    { y: 5.5, ang: 3.9, len: 2.3, tilt: 1.02 },
-    { y: 6.1, ang: 5.3, len: 1.9, tilt: 0.84 }
-  ];
-  for (const b of branches) {
-    const limb = new THREE.CylinderGeometry(0.055, 0.13, b.len, 6);
-    limb.translate(0, b.len * 0.5, 0);
-    limb.rotateZ(-b.tilt);
-    limb.rotateY(b.ang);
-    limb.translate(Math.sin(b.y * 0.48) * 0.24, b.y, Math.cos(b.y * 0.38) * 0.16);
+  // Structural limbs reaching straight into each painterly foliage cluster
+  for (let i = 0; i < 4; i++) {
+    const tip = PINE_BRANCH_TIPS[i];
+    const startY = tip.y - 1.25;
+    const startX = Math.sin(startY * 0.46) * 0.28 + startY * 0.04;
+    const startZ = Math.cos(startY * 0.38) * 0.18;
+
+    const dx = tip.x - startX;
+    const dy = tip.y - startY;
+    const dz = tip.z - startZ;
+    const len = Math.hypot(dx, dy, dz);
+
+    const limb = new THREE.CylinderGeometry(0.05, 0.12, len, 6);
+    limb.translate(0, len * 0.5, 0);
+    const dir = new THREE.Vector3(dx, dy, dz).normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    limb.applyQuaternion(quat);
+    limb.translate(startX, startY, startZ);
     parts.push(limb);
   }
   return mergeNonIndexedGeos(parts);
 }
 
-// True 3D painterly Scots pine needle bough clouds (zero flat discs)
-function createScotsPineCanopy3DGeometry() {
-  const clusters = [
-    { x: 1.5, y: 5.2, z: 0.5, rx: 1.8, ry: 0.82, rz: 1.6 },
-    { x: -1.15, y: 5.8, z: 1.3, rx: 1.7, ry: 0.80, rz: 1.65 },
-    { x: -1.4, y: 6.25, z: -1.1, rx: 1.75, ry: 0.84, rz: 1.55 },
-    { x: 1.0, y: 6.75, z: -1.15, rx: 1.6, ry: 0.78, rz: 1.5 },
-    { x: 0.0, y: 7.5, z: 0.05, rx: 1.95, ry: 0.90, rz: 1.9 }
-  ];
+// Feathered Painterly Scots Pine Canopy: airy crossed bough sprays + transferred spherical crown normals!
+function createScotsPineCanopyFeatheredGeometry() {
+  const rng = mulberry32(61744);
+  const cards = [];
 
-  const parts = [];
-  for (let c = 0; c < clusters.length; c++) {
-    const cl = clusters[c];
-    const g = new THREE.IcosahedronGeometry(1.0, 2);
-    const pos = g.attributes.position;
-    const cols = new Float32Array(pos.count * 3);
+  for (const cluster of PINE_BRANCH_TIPS) {
+    // 5 randomly tilted feathered needle-bough cards per branch cluster -> rich airy oil-painted crown
+    for (let k = 0; k < 5; k++) {
+      const sz = cluster.r * (0.85 + rng() * 0.42);
+      const g = new THREE.PlaneGeometry(sz, sz * 0.88);
 
-    for (let i = 0; i < pos.count; i++) {
-      const vx = pos.getX(i);
-      const vy = pos.getY(i);
-      const vz = pos.getZ(i);
-      const n =
-        1.0 +
-        Math.sin(vx * 5.2 + c * 1.7) * 0.16 +
-        Math.cos(vz * 4.8 - vy * 3.5) * 0.15 +
-        Math.sin((vx + vz) * 9.0) * 0.07;
+      const ox = cluster.x + (rng() - 0.5) * 0.95;
+      const oy = cluster.y + (rng() - 0.5) * 0.58;
+      const oz = cluster.z + (rng() - 0.5) * 0.95;
 
-      pos.setXYZ(i, vx * cl.rx * n + cl.x, vy * cl.ry * n + cl.y, vz * cl.rz * n + cl.z);
-      const ao = clamp(0.42 + (vy * 0.5 + 0.5) * 0.68, 0.34, 1.12);
-      cols[i * 3] = ao;
-      cols[i * 3 + 1] = ao;
-      cols[i * 3 + 2] = ao;
+      // Tilt cards organically so crown reads full from ground level AND from high ridges
+      const pitch = k === 0 ? -Math.PI * 0.42 : (rng() - 0.5) * 1.15;
+      const yaw = (k / 5) * Math.PI * 2 + rng() * 0.7;
+      const roll = (rng() - 0.5) * 0.55;
+
+      g.rotateX(pitch);
+      g.rotateZ(roll);
+      g.rotateY(yaw);
+      g.translate(ox, oy, oz);
+
+      const pos = g.attributes.position;
+      const norm = g.attributes.normal;
+      const cols = new Float32Array(pos.count * 3);
+
+      for (let i = 0; i < pos.count; i++) {
+        const px = pos.getX(i);
+        const py = pos.getY(i);
+        const pz = pos.getZ(i);
+
+        // AAA Painterly Trick: Transfer spherical normals from the whole tree crown center
+        const nx = px;
+        const ny = (py - 5.2) * 1.45 + 1.1;
+        const nz = pz;
+        const inv = 1 / (Math.hypot(nx, ny, nz) || 1);
+        norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
+
+        // Warm sunlit upper crown, deep cool-shaded bough undersides
+        const crownLift = clamp((py - 4.4) / 3.4, 0, 1);
+        const shade = lerp(0.56, 1.14, crownLift);
+        cols[i * 3] = shade;
+        cols[i * 3 + 1] = shade;
+        cols[i * 3 + 2] = shade;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      cards.push(g);
     }
-    g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    g.computeVertexNormals();
-    parts.push(g);
   }
-  return mergeNonIndexedGeos(parts);
+
+  return mergeNonIndexedGeos(cards);
 }
 
 // Authentic pitched gable roof for Highland stone blackhouses
@@ -245,7 +417,7 @@ export class WorldRenderer {
     this.canvas = canvas;
     this.onixField = onixField;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.2, 1250);
+    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.2, 2800);
     this.renderer = null;
     this.chunks = new Map();
     this.flickerLights = [];
@@ -259,7 +431,6 @@ export class WorldRenderer {
     this.tmpColor = new THREE.Color();
     this.tmpDummy = new THREE.Object3D();
 
-    // Shared GPU uniforms driving every Romantic Oil Painting + ONIX shader simultaneously
     this.sharedUniforms = {
       uOnixField: { value: this.onixField.texture },
       uRippleTex: { value: this.onixField.rippleTexture },
@@ -267,7 +438,7 @@ export class WorldRenderer {
       uRippleWorldSize: { value: this.onixField.rippleWorldSize },
       uTime: { value: 0 },
       uRain: { value: 0.0 },
-      uMistStrength: { value: 0.58 },
+      uMistStrength: { value: 0.52 },
       uDayFactor: { value: 1.0 },
       uSunDir: { value: new THREE.Vector3(0.5, 0.45, -0.45).normalize() },
       uSunColor: { value: new THREE.Color(0xffd79b) }
@@ -288,10 +459,15 @@ export class WorldRenderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
 
-    this.scene.fog = new THREE.FogExp2(0x7c8f9e, 0.0020);
+    this.scene.fog = new THREE.FogExp2(0x7c8f9e, 0.00125);
+
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.pineBoughTex = createPainterlyPineBoughTexture(aniso);
+    this.heatherSprigTex = createPainterlyHeatherSprigTexture(aniso);
 
     // Pure-physics Romantic Oil Painting shaders
     this.terrainMat = createOnixTerrainMaterial(this.sharedUniforms);
+    this.horizonMat = createOnixHorizonMaterial(this.sharedUniforms);
     this.stoneMat = createOnixStoneMaterial(this.sharedUniforms, { coursed: true, tint: 0xd8d6d0 });
     this.darkStoneMat = createOnixStoneMaterial(this.sharedUniforms, { coursed: true, tint: 0x9ca0a2 });
     this.boulderMat = createOnixStoneMaterial(this.sharedUniforms, { coursed: false, tint: 0xc2c4c6 });
@@ -303,6 +479,7 @@ export class WorldRenderer {
     this._setupSkyAndIBL();
     this._setupLighting();
     this._buildWater();
+    this._buildDistantMountains();
     this._buildSector01Landmarks();
     this._buildInstancedTreesAndRocks();
     this._buildStreaming3DFoliage();
@@ -323,7 +500,6 @@ export class WorldRenderer {
       uStormFactor: { value: 0.22 }
     };
 
-    // J.M.W. Turner Romantic Highland Oil Sky Dome: painterly storm billows & luminous golden sunbreaks
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -385,18 +561,15 @@ export class WorldRenderer {
 
           vec3 col = mix(horizon, zenith, pow(h, 0.52));
 
-          // Luminous Turner sunbreak glow
           float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
           vec3 sunTint = mix(vec3(1.0, 0.56, 0.20), vec3(1.0, 0.90, 0.68), uDayFactor);
           float sunVis = (1.0 - uStormFactor * 0.78) * uDayFactor;
           col += sunTint * pow(sunDot, 6.0) * 0.46 * sunVis;
           col += sunTint * smoothstep(0.9975, 0.9994, sunDot) * 5.2 * sunVis;
 
-          // Domain-warped painterly oil-brush Atlantic storm clouds
           if (dir.y > 0.005) {
             vec2 uv = dir.xz / (dir.y + 0.15) * 1.15;
             uv += vec2(uTime * 0.010, uTime * 0.004);
-            // Swirl cloud strokes for unmistakable oil-on-canvas sky brushwork
             vec2 warp = vec2(fbm(uv * 0.8 + 1.4), fbm(uv * 0.8 + 5.2)) - 0.5;
             float c1 = fbm(uv + warp * 0.85);
             float c2 = fbm(uv * 2.3 - vec2(uTime * 0.005, 0.0) + warp * 0.45);
@@ -425,11 +598,10 @@ export class WorldRenderer {
       `
     });
 
-    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(1020, 32, 20), skyMat);
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(2450, 32, 20), skyMat);
     this.skyDome.frustumCulled = false;
     this.scene.add(this.skyDome);
 
-    // Chiaroscuro PMREM bounce environment (cool slate-blue zenith, golden horizon, dark peat earth)
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const envScene = new THREE.Scene();
     const envSky = new THREE.Mesh(
@@ -477,7 +649,7 @@ export class WorldRenderer {
   }
 
   _buildWater() {
-    const geo = new THREE.PlaneGeometry(1900, 1900, 1, 1);
+    const geo = new THREE.PlaneGeometry(4200, 4200, 1, 1);
     geo.rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(geo, this.waterMat);
     this.waterMesh.position.y = WATER_LEVEL;
@@ -485,10 +657,77 @@ export class WorldRenderer {
     this.scene.add(this.waterMesh);
   }
 
+  // 2.4 km Lochaber Munro horizon ring (zero flat sky cutoff; frames Loch Linnhe with Ardgour hills to the west)
+  _buildDistantMountains() {
+    const segAng = 88;
+    const segRad = 18;
+    const rInner = 430;
+    const rOuter = 2350;
+
+    const verts = [];
+    const indices = [];
+
+    for (let ir = 0; ir <= segRad; ir++) {
+      const t = ir / segRad;
+      // Exponential radial spacing: denser near chunks, sweeping out to 2.35 km
+      const r = lerp(rInner, rOuter, t * t * 0.7 + t * 0.3);
+
+      for (let ia = 0; ia <= segAng; ia++) {
+        const ang = (ia / segAng) * Math.PI * 2;
+        const wx = Math.cos(ang) * r;
+        const wz = Math.sin(ang) * r;
+
+        const baseH = heightAt(wx, wz);
+        const outerFade = smoothstep(0.04, 0.55, t);
+        const edgeDip = ir === 0 ? -2.2 : 0.0;
+
+        // Sea-loch channel runs SW-NE across western side; far Ardgour mountains rise beyond x < -650
+        const isOpenLochChannel = wx < -190 && wx > -680 && Math.abs(wz) < 1200;
+        const farWestShore = smoothstep(-580, -1080, wx);
+
+        const macroPeaks = ridgeNoise2D(wx * 0.00095, wz * 0.00095, 4, 2744) * 285;
+        const subRidges = fbm2D(wx * 0.0022, wz * 0.0022, 3, 3744) * 58;
+
+        let extraH = 0;
+        if (wx < -190) {
+          // Far shore across Loch Linnhe rises dramatically out of the sea loch
+          extraH = (macroPeaks * 0.72 + subRidges * 0.5 + 36) * farWestShore * outerFade;
+          if (isOpenLochChannel) extraH = -8;
+        } else {
+          // Ben Nevis & Great Glen Munros ringing North, East, and South
+          const eastBoost = lerp(0.68, 1.15, smoothstep(-190, 900, wx));
+          extraH = (macroPeaks * eastBoost + subRidges + 28) * outerFade;
+        }
+
+        const wy = baseH + extraH + edgeDip;
+        verts.push(wx, wy, wz);
+      }
+    }
+
+    const row = segAng + 1;
+    for (let ir = 0; ir < segRad; ir++) {
+      for (let ia = 0; ia < segAng; ia++) {
+        const a = ir * row + ia;
+        const b = a + 1;
+        const c = (ir + 1) * row + ia;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+
+    this.horizonMesh = new THREE.Mesh(geo, this.horizonMat);
+    this.horizonMesh.receiveShadow = false;
+    this.scene.add(this.horizonMesh);
+  }
+
   _buildSector01Landmarks() {
     const emberMat = new THREE.MeshBasicMaterial({ color: 0xff922e });
 
-    // 1. Baile MacRae — Stone-Gabled Highland Blackhouses with chimney smoke
     const cl = LANDMARKS.clachan;
     const bothies = [
       { dx: -12, dz: -7, w: 8.4, d: 5.0, rot: 0.25 },
@@ -529,7 +768,6 @@ export class WorldRenderer {
       chimney.castShadow = true;
       group.add(chimney);
 
-      // World position of chimney top for curling peat smoke
       const chLocalX = b.w * 0.34;
       const cosR = Math.cos(b.rot);
       const sinR = Math.sin(b.rot);
@@ -613,13 +851,12 @@ export class WorldRenderer {
     this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 20, phase: 0.4 });
     this.smokeSources.push({ x: cl.x, y: fireY + 0.9, z: cl.z });
 
-    // 2. Scottish Stone Tower-House Keep (Torr an Fhaire — Hanoverian Garrison Watchtower)
+    // Scottish Stone Tower-House Keep (Torr an Fhaire)
     const tw = LANDMARKS.watchtower;
     const twY = heightAt(tw.x, tw.z);
     const towerGroup = new THREE.Group();
     towerGroup.position.set(tw.x, twY, tw.z);
 
-    // Heavy battered square stone keep with dramatic silhouette
     const keepPlinth = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 6.6, 3.2, 4), this.darkStoneMat);
     keepPlinth.rotation.y = Math.PI / 4;
     keepPlinth.position.y = 1.1;
@@ -638,7 +875,6 @@ export class WorldRenderer {
     corbel.castShadow = true;
     towerGroup.add(corbel);
 
-    // Corner battlements & crenels
     const edgePts = [-3.6, -1.2, 1.2, 3.6];
     for (const p of edgePts) {
       for (const s of [-3.9, 3.9]) {
@@ -654,7 +890,6 @@ export class WorldRenderer {
       }
     }
 
-    // Flagpole & crimson garrison pennant
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6.8, 6), this.barkMat);
     pole.position.set(0, 18.4, 0);
     towerGroup.add(pole);
@@ -666,7 +901,6 @@ export class WorldRenderer {
     this.towerFlag.position.set(1.45, 20.8, 0);
     towerGroup.add(this.towerFlag);
 
-    // Three warm fire braziers (rooftop + flanking crag beacons like the Romantic concept art)
     const beaconCoords = [
       { x: 0, y: 15.8, z: 0, power: 34 },
       { x: -6.2, y: 2.4, z: 3.4, power: 24 },
@@ -690,7 +924,7 @@ export class WorldRenderer {
     }
     this.scene.add(towerGroup);
 
-    // 3. Smuggling Cove Timber Jetty on Loch Linnhe
+    // Smuggling Cove Timber Jetty on Loch Linnhe
     const jt = LANDMARKS.coveJetty;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 3.2), this.barkMat);
     deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z);
@@ -707,7 +941,7 @@ export class WorldRenderer {
       }
     }
 
-    // 4. Stacked Stone Boundary Cairn
+    // Stacked Stone Boundary Cairn
     const cr = LANDMARKS.stashCairn;
     const crY = heightAt(cr.x, cr.z);
     for (let layer = 0; layer < 4; layer++) {
@@ -721,7 +955,7 @@ export class WorldRenderer {
       this.scene.add(st);
     }
 
-    // 5. General Wade's Road Stone Milestones
+    // General Wade's Road Stone Milestones
     for (let mz = -360; mz <= 360; mz += 120) {
       const mx = roadCenterX(mz) + 5.2;
       const my = heightAt(mx, mz);
@@ -734,12 +968,15 @@ export class WorldRenderer {
 
   _buildInstancedTreesAndRocks() {
     const rng = mulberry32(174401);
-    const maxPines = 560;
-    const maxRocks = 420;
+    const maxPines = 580;
+    const maxRocks = 440;
 
     const trunkGeo = createScotsPineWoodGeometry();
-    const crownGeo = createScotsPineCanopy3DGeometry();
-    const crownMat = createOnixFoliageMaterial(this.sharedUniforms, 'pine');
+    const crownGeo = createScotsPineCanopyFeatheredGeometry();
+    const crownMat = createOnixFoliageMaterial(this.sharedUniforms, {
+      kind: 'pine',
+      map: this.pineBoughTex
+    });
 
     const rockGeo = new THREE.IcosahedronGeometry(1.0, 2);
     const rPos = rockGeo.attributes.position;
@@ -767,28 +1004,32 @@ export class WorldRenderer {
     const color = new THREE.Color();
 
     let pineCount = 0;
-    for (let tries = 0; tries < 3200 && pineCount < maxPines; tries++) {
-      const x = (rng() - 0.5) * 960;
-      const z = (rng() - 0.5) * 960;
+    for (let tries = 0; tries < 3600 && pineCount < maxPines; tries++) {
+      const x = (rng() - 0.5) * 980;
+      const z = (rng() - 0.5) * 980;
       const y = heightAt(x, z);
-      if (y < 2.5 || y > 58) continue;
+      if (y < 2.5 || y > 60) continue;
       if (Math.abs(x - roadCenterX(z)) < 11.5) continue;
       if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 34) continue;
       if (Math.hypot(x - LANDMARKS.watchtower.x, z - LANDMARKS.watchtower.z) < 26) continue;
 
+      // Group Scots pines into organic Caledonian groves rather than uniform orchards
+      const grove = fbm2D(x * 0.011, z * 0.011, 3, 9101);
+      if (grove < -0.14 && rng() > 0.15) continue;
+
       const n = normalAt(x, z, 1.0);
       if (1 - n.y > 0.27) continue;
 
-      const scale = 0.82 + rng() * 1.05;
+      const scale = 0.85 + rng() * 1.15;
       dummy.position.set(x, y - 0.25, z);
-      dummy.rotation.set((rng() - 0.5) * 0.08, rng() * Math.PI * 2, (rng() - 0.5) * 0.08);
-      dummy.scale.set(scale, scale * (0.9 + rng() * 0.34), scale);
+      dummy.rotation.set((rng() - 0.5) * 0.10, rng() * Math.PI * 2, (rng() - 0.5) * 0.10);
+      dummy.scale.set(scale, scale * (0.88 + rng() * 0.36), scale);
       dummy.updateMatrix();
 
       trunks.setMatrixAt(pineCount, dummy.matrix);
       crowns.setMatrixAt(pineCount, dummy.matrix);
-      const tone = 0.72 + rng() * 0.34;
-      color.setRGB(tone * 0.94, tone, tone * 0.92);
+      const tone = 0.78 + rng() * 0.32;
+      color.setRGB(tone * 0.96, tone, tone * 0.92);
       crowns.setColorAt(pineCount, color);
       pineCount++;
     }
@@ -799,9 +1040,9 @@ export class WorldRenderer {
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
 
     let rockCount = 0;
-    for (let tries = 0; tries < 1600 && rockCount < maxRocks; tries++) {
-      const x = (rng() - 0.5) * 960;
-      const z = (rng() - 0.5) * 960;
+    for (let tries = 0; tries < 1800 && rockCount < maxRocks; tries++) {
+      const x = (rng() - 0.5) * 980;
+      const z = (rng() - 0.5) * 980;
       const y = heightAt(x, z);
       if (y < 0.2) continue;
       if (Math.abs(x - roadCenterX(z)) < 7.5) continue;
@@ -826,16 +1067,24 @@ export class WorldRenderer {
 
   _buildStreaming3DFoliage() {
     const grassGeo = create3DGrassClumpGeometry();
-    const heatherGeo = create3DHeatherCushionGeometry();
+    const heatherGeo = createFeatheredHeatherShrubGeometry();
 
-    const grassMat = createOnixFoliageMaterial(this.sharedUniforms, 'grass');
-    const heatherMat = createOnixFoliageMaterial(this.sharedUniforms, 'heather');
+    const grassMat = createOnixFoliageMaterial(this.sharedUniforms, {
+      kind: 'grass',
+      fadeStart: 42.0,
+      fadeEnd: 84.0
+    });
+    const heatherMat = createOnixFoliageMaterial(this.sharedUniforms, {
+      kind: 'heather',
+      map: this.heatherSprigTex,
+      fadeStart: 44.0,
+      fadeEnd: 86.0
+    });
 
     this.grassInst = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
     this.heatherInst = new THREE.InstancedMesh(heatherGeo, heatherMat, MAX_HEATHER);
 
     this.grassInst.receiveShadow = true;
-    this.heatherInst.castShadow = true;
     this.heatherInst.receiveShadow = true;
     this.grassInst.frustumCulled = false;
     this.heatherInst.frustumCulled = false;
@@ -843,13 +1092,18 @@ export class WorldRenderer {
     this.scene.add(this.grassInst, this.heatherInst);
   }
 
-  _updateStreamingFoliage(px, pz) {
-    if (Math.hypot(px - this.lastFoliageX, pz - this.lastFoliageZ) < 5.0) return;
-    this.lastFoliageX = px;
-    this.lastFoliageZ = pz;
+  _updateStreamingFoliage(px, pz, camYaw) {
+    // Shift streaming disc 26m ahead along camera gaze -> doubles visible grass distance in front of you!
+    const focusX = px - Math.sin(camYaw) * 26.0;
+    const focusZ = pz - Math.cos(camYaw) * 26.0;
 
-    const baseGX = Math.round(px / FOLIAGE_STEP);
-    const baseGZ = Math.round(pz / FOLIAGE_STEP);
+    if (Math.hypot(focusX - this.lastFoliageX, focusZ - this.lastFoliageZ) < 5.5) return;
+    this.lastFoliageX = focusX;
+    this.lastFoliageZ = focusZ;
+
+    const baseGX = Math.round(focusX / FOLIAGE_STEP);
+    const baseGZ = Math.round(focusZ / FOLIAGE_STEP);
+    const maxR = FOLIAGE_HALF_GRID * FOLIAGE_STEP;
     const dummy = this.tmpDummy;
     const col = this.tmpColor;
 
@@ -865,39 +1119,44 @@ export class WorldRenderer {
         const r2 = hash2D(gx, gz, 4201);
         const r3 = hash2D(gx, gz, 4301);
 
-        const wx = (gx + (r1 - 0.5) * 0.88) * FOLIAGE_STEP;
-        const wz = (gz + (r2 - 0.5) * 0.88) * FOLIAGE_STEP;
+        const wx = (gx + (r1 - 0.5) * 0.96) * FOLIAGE_STEP;
+        const wz = (gz + (r2 - 0.5) * 0.96) * FOLIAGE_STEP;
 
-        if (Math.hypot(wx - px, wz - pz) > FOLIAGE_HALF_GRID * FOLIAGE_STEP) continue;
+        if (Math.hypot(wx - focusX, wz - focusZ) > maxR) continue;
 
         const wy = heightAt(wx, wz);
         if (wy < WATER_LEVEL + 1.4 || wy > 56) continue;
         if (Math.abs(wx - roadCenterX(wz)) < 4.9) continue;
-        if (Math.hypot(wx - LANDMARKS.clachan.x, wz - LANDMARKS.clachan.z) < 5.0) continue;
+        if (Math.hypot(wx - LANDMARKS.clachan.x, wz - LANDMARKS.clachan.z) < 5.2) continue;
 
         const surf = surfaceAt(wx, wz);
         if (surf.id === 'granite' || surf.id === 'water' || surf.id === 'shingle') continue;
 
-        const isHeather = surf.id === 'heather' ? r3 > 0.34 : r3 > 0.80;
-        const scale = 0.72 + r1 * 0.78;
+        // Organic sweeping Highland moorland drifts (dense patches + open mossy clearings, zero grid feel)
+        const drift = fbm2D(wx * 0.026, wz * 0.026, 3, 17447);
+        const density = fbm2D(wx * 0.065, wz * 0.065, 2, 17448);
+        if (density < -0.26 && r3 < 0.72) continue;
 
-        dummy.position.set(wx, wy - 0.04, wz);
+        const isHeather = surf.id === 'heather' ? drift > -0.18 && r3 > 0.26 : drift > 0.22 && r3 > 0.45;
+        const scale = 0.78 + r1 * 0.82;
+
+        dummy.position.set(wx, wy - 0.05, wz);
         dummy.rotation.set(0, r2 * Math.PI * 2, 0);
-        dummy.scale.set(scale, scale * (0.85 + r3 * 0.4), scale);
+        dummy.scale.set(scale, scale * (0.82 + r3 * 0.44), scale);
         dummy.updateMatrix();
 
         if (isHeather) {
           if (hCount >= MAX_HEATHER) continue;
           this.heatherInst.setMatrixAt(hCount, dummy.matrix);
-          const shade = 0.74 + r2 * 0.42;
-          col.setRGB(shade, shade * 0.96, shade * 1.02);
+          const shade = 0.76 + r2 * 0.38;
+          col.setRGB(shade * 1.02, shade * 0.96, shade * 1.04);
           this.heatherInst.setColorAt(hCount, col);
           hCount++;
         } else {
           if (gCount >= MAX_GRASS) continue;
           this.grassInst.setMatrixAt(gCount, dummy.matrix);
-          const shade = 0.74 + r1 * 0.4;
-          col.setRGB(shade * 1.02, shade, shade * 0.92);
+          const shade = 0.78 + r1 * 0.36;
+          col.setRGB(shade * 1.04, shade, shade * 0.90);
           this.grassInst.setColorAt(gCount, col);
           gCount++;
         }
@@ -939,7 +1198,6 @@ export class WorldRenderer {
       }
     }
 
-    // Driving Highland Rain Curtain driven by ONIX LLG wind vector
     const dropCount = 900;
     this.rainPositions = new Float32Array(dropCount * 6);
     this.rainOffsets = new Float32Array(dropCount * 3);
@@ -1111,7 +1369,7 @@ export class WorldRenderer {
   _updateAtmosphere(dt, worldState, px, pz) {
     const wState = worldState.weather?.state || 'clear';
     const targetRain = wState === 'rain' ? 1.0 : 0.0;
-    const targetMist = wState === 'mist' ? 1.65 : wState === 'rain' ? 1.15 : 0.56;
+    const targetMist = wState === 'mist' ? 1.55 : wState === 'rain' ? 1.05 : 0.50;
     const targetStorm = wState === 'rain' ? 0.92 : wState === 'mist' ? 0.58 : 0.22;
 
     const blend = 1 - Math.exp(-1.5 * dt);
@@ -1122,7 +1380,6 @@ export class WorldRenderer {
     const storm = this.skyUniforms.uStormFactor.value;
     const rain = this.sharedUniforms.uRain.value;
 
-    // 24h Highland Sun Arc
     const sunAngle = ((worldState.timeOfDay - 6) / 24) * Math.PI * 2;
     const elev = Math.sin(sunAngle);
     const horiz = Math.cos(sunAngle);
@@ -1142,12 +1399,12 @@ export class WorldRenderer {
     this.sunLight.target.position.set(snapX, 0, snapZ);
     this.sunLight.target.updateMatrixWorld();
 
-    // Sync Turner valley fog color with storm & golden hour
+    // Balanced fog density so 2.4 km Lochaber Munros read as sweeping layered Turner washes
     const fogNight = new THREE.Color(0x091220);
     const fogDay = new THREE.Color(0x6e8394).lerp(new THREE.Color(0x4b5762), storm);
     const fogGold = new THREE.Color(0xc47d46);
     this.scene.fog.color.copy(fogNight).lerp(fogDay, dayFactor).lerp(fogGold, goldenFactor * 0.58 * (1 - storm * 0.7));
-    this.scene.fog.density = lerp(0.0017, 0.0044, clamp((targetMist - 0.5) / 1.15, 0, 1));
+    this.scene.fog.density = lerp(0.00115, 0.0034, clamp((targetMist - 0.45) / 1.1, 0, 1));
 
     const sunHex = elev > 0.02 ? (goldenFactor > 0.25 ? 0xffb66a : 0xffe8c6) : 0x7c9ec8;
     this.sunLight.color.setHex(sunHex);
@@ -1170,7 +1427,6 @@ export class WorldRenderer {
       this.towerFlag.rotation.y = Math.atan2(wind.z, wind.x) + Math.sin(this.elapsed * (4.2 + rain * 4)) * 0.2;
     }
 
-    // Falling rain streaks slanted by live ONIX wind vector
     this.rainLines.visible = rain > 0.08;
     if (this.rainLines.visible) {
       this.rainLines.material.opacity = rain * 0.38;
@@ -1225,14 +1481,13 @@ export class WorldRenderer {
     this.sharedUniforms.uTime.value = this.elapsed;
 
     this._updateTerrainChunks(player.x, player.z);
-    this._updateStreamingFoliage(player.x, player.z);
+    this._updateStreamingFoliage(player.x, player.z, player.camYaw);
     this._updateAtmosphere(dt, worldState, player.x, player.z);
     this._updateSmoke(dt);
 
     this.waterMesh.position.x = Math.round(player.x / 50) * 50;
     this.waterMesh.position.z = Math.round(player.z / 50) * 50;
 
-    // Update Callum
     this.callum.position.set(player.x, player.y, player.z);
     this.callum.rotation.y = player.facingYaw;
 
@@ -1246,7 +1501,6 @@ export class WorldRenderer {
     this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
     this.callumBody.rotation.x = player.crouchBlend * 0.28 + strideAmp * 0.06;
 
-    // Over-the-shoulder RDR2 camera
     const shoulderRight = 0.55;
     const pivotY = player.y + lerp(1.62, 1.18, player.crouchBlend);
 
