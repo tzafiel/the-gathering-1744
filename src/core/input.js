@@ -14,6 +14,7 @@ export class InputManager {
     this.interactQueued = false;
     this.jumpQueued = false;
     this.weatherQueued = false;
+    this.oilToggleQueued = false;
 
     this.touchMoveX = 0;
     this.touchMoveZ = 0;
@@ -26,6 +27,7 @@ export class InputManager {
     this.prevPadJump = false;
     this.prevPadInteract = false;
     this.prevPadWeather = false;
+    this.prevPadOil = false;
 
     this._bindKeyboardMouse();
     this._bindTouch();
@@ -36,6 +38,7 @@ export class InputManager {
     this.interactQueued = false;
     this.jumpQueued = false;
     this.weatherQueued = false;
+    this.oilToggleQueued = false;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.wheelDelta = 0;
@@ -54,6 +57,7 @@ export class InputManager {
         if (e.code === 'Space') this.jumpQueued = true;
         if (e.code === 'KeyE') this.interactQueued = true;
         if (e.code === 'KeyV') this.weatherQueued = true;
+        if (e.code === 'KeyP') this.oilToggleQueued = true;
       }
       this.keys.add(e.code);
     });
@@ -259,6 +263,10 @@ export class InputManager {
       if (weatherBtn && !this.prevPadWeather) this.weatherQueued = true;
       this.prevPadWeather = weatherBtn;
 
+      const oilBtn = Boolean(pad.buttons[8]?.pressed);
+      if (oilBtn && !this.prevPadOil) this.oilToggleQueued = true;
+      this.prevPadOil = oilBtn;
+
       const pauseBtn = Boolean(pad.buttons[9]?.pressed);
       if (pauseBtn && !this.prevPadPause) this.pauseQueued = true;
       this.prevPadPause = pauseBtn;
@@ -278,10 +286,12 @@ export class InputManager {
     const jump = this.jumpQueued;
     const interact = this.interactQueued;
     const weatherToggle = this.weatherQueued;
+    const oilToggle = this.oilToggleQueued;
     this.pauseQueued = false;
     this.jumpQueued = false;
     this.interactQueued = false;
     this.weatherQueued = false;
+    this.oilToggleQueued = false;
 
     return {
       moveX,
@@ -294,6 +304,7 @@ export class InputManager {
       jump,
       interact,
       weatherToggle,
+      oilToggle,
       pausePressed,
       timeDelta,
       gamepadConnected
