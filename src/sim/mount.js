@@ -1,10 +1,6 @@
 import { heightAt, normalAt, surfaceAt, WATER_LEVEL } from '../world/terrain.js';
 import { clamp, lerp, mulberry32 } from '../core/prng.js';
 
-// Bramble — Callum's single lifelong Highland Garron.
-// Heavy, grounded horseback inertia, 4 real gaits (Walk/Trot/Canter/Gallop),
-// autonomous grazing & whistle recall, and persistent bond/care state for 1747 carryover.
-
 export class MountController {
   constructor(worldState) {
     const m = worldState.mount || {};
@@ -12,29 +8,27 @@ export class MountController {
     this.coatSeed = m.coatSeed ?? 407;
     this.scars = Array.isArray(m.scars) ? [...m.scars] : [];
 
-    this.x = typeof m.x === 'number' ? m.x : 26;
-    this.z = typeof m.z === 'number' ? m.z : 26;
+    this.x = typeof m.x === 'number' ? m.x : 29;
+    this.z = typeof m.z === 'number' ? m.z : 28;
     this.y = heightAt(this.x, this.z);
 
     this.vx = 0;
     this.vz = 0;
     this.vy = 0;
     this.speed = 0;
-    this.yaw = typeof m.yaw === 'number' ? m.yaw : 0.7;
-    this.pitch = 0; // Terrain slope pitch
-    this.roll = 0;  // Subtle bank into turns + slope roll
+    this.yaw = typeof m.yaw === 'number' ? m.yaw : 0.65;
+    this.pitch = 0;
+    this.roll = 0;
 
     this.grounded = true;
     this.mounted = false;
 
-    // Persistent bond & condition metrics
     this.bond = clamp(m.bond ?? 0.55, 0, 1);
     this.stamina = clamp(m.stamina ?? 1.0, 0, 1);
     this.calm = clamp(m.calm ?? 0.92, 0, 1);
     this.wetness = clamp(m.wetness ?? 0.0, 0, 1);
 
-    // Gait & animation state
-    this.gait = 'IDLE'; // IDLE | WALK | TROT | CANTER | GALLOP | BACKING
+    this.gait = 'IDLE';
     this.stridePhase = 0;
     this.lastStepSlot = 0;
     this.grazeBlend = 0;
@@ -42,14 +36,12 @@ export class MountController {
     this.rearTimer = 0;
     this.surface = surfaceAt(this.x, this.z);
 
-    // Autonomous AI when Callum is on foot
-    this.aiState = 'GRAZING'; // IDLE | GRAZING | WANDERING | CALLED
+    this.aiState = 'GRAZING';
     this.aiTimer = 3.5;
     this.targetX = this.x;
     this.targetZ = this.z;
     this.rng = mulberry32(this.coatSeed + 911);
 
-    // One-frame event queues consumed by AudioEngine & HUD
     this.events = [];
   }
 
@@ -60,12 +52,10 @@ export class MountController {
     return out;
   }
 
-  // Callum whistles from across the glen — Bramble answers and trots/canters straight over
   callTo(px, pz) {
     if (this.mounted) return false;
     const dist = Math.hypot(px - this.x, pz - this.z);
 
-    // If Callum wandered > 240m away across the highlands, bring Bramble onto a nearby ridge approach
     if (dist > 240) {
       const ang = this.rng() * Math.PI * 2;
       const rx = px + Math.cos(ang) * 58;
@@ -85,7 +75,6 @@ export class MountController {
     return true;
   }
 
-  // Brush, calm, or feed oats — builds permanent bond & restores calm/stamina
   tendMount() {
     if (this.careTimer > 0) return false;
     this.careTimer = 2.0;
@@ -114,7 +103,6 @@ export class MountController {
       this._updateAutonomous(dt, player, n, slope, rainIntensity);
     }
 
-    // Wetness from rain, wading in Loch Linnhe, or bog mud
     if (this.y < WATER_LEVEL + 0.15) {
       this.wetness = clamp(this.wetness + 0.35 * dt, 0, 1);
     } else if (rainIntensity > 0.1) {
@@ -123,7 +111,6 @@ export class MountController {
       this.wetness = clamp(this.wetness - 0.018 * dt, 0, 1);
     }
 
-    // Align horse body pitch & roll smoothly to Highland terrain slope + turn banking
     const fwdX = -Math.sin(this.yaw);
     const fwdZ = -Math.cos(this.yaw);
     const rgtX = Math.cos(this.yaw);
@@ -141,7 +128,6 @@ export class MountController {
     this.pitch = lerp(this.pitch, targetPitch, 1 - Math.exp(-8.5 * dt));
     this.roll = lerp(this.roll, slopeRoll + steerBank, 1 - Math.exp(-8.0 * dt));
 
-    // Stride cadence & synced 4-beat / 3-beat hoofbeat audio triggers
     if (this.speed > 0.35 && this.grounded) {
       const freqMult =
         this.gait === 'GALLOP' ? 1.18 :
@@ -149,7 +135,6 @@ export class MountController {
         this.gait === 'TROT' ? 1.55 : 1.85;
       this.stridePhase += this.speed * dt * freqMult;
 
-      // Trigger crisp rhythmic hoofbeats on quarter-cycles (walk/trot) or galloping triplets
       const stepsPerCycle = this.gait === 'GALLOP' || this.gait === 'CANTER' ? 3 : 4;
       const slot = Math.floor((this.stridePhase / (Math.PI * 2)) * stepsPerCycle);
       if (slot !== this.lastStepSlot) {
@@ -168,56 +153,42 @@ export class MountController {
   _updateMounted(dt, input, player, n, slope, rainIntensity) {
     this.grazeBlend = lerp(this.grazeBlend, 0, 1 - Math.exp(-8 * dt));
 
-    // Camera orbit belongs to Callum's eyes even while riding
+    // Free First-Person head look from Bramble's saddle (independent of horse heading!)
     player.camYaw -= input.lookX;
-    player.camPitch = clamp(player.camPitch + input.lookY, -0.32, 0.95);
-    if (input.zoomDelta !== 0) {
-      player.camDistance = clamp(player.camDistance + input.zoomDelta * 0.45, 4.2, 10.5);
-    }
+    player.camPitch = clamp(player.camPitch + input.lookY, -1.15, 1.15);
 
-    const forwardInput = -input.moveZ; // W / Stick Up > 0
-    const steerInput = input.moveX;    // A < 0, D > 0
+    const forwardInput = -input.moveZ;
+    const steerInput = input.moveX;
 
-    // Heavy Highland Garron steering: agile at a walk, sweeping momentum arc at a gallop
     const speedRatio = clamp(this.speed / 14.0, 0, 1);
     const turnRate = lerp(2.15, 1.05, speedRatio) * (this.surface.id === 'peat_bog' ? 0.78 : 1.0);
 
-    // Camera-assisted steering when moving forward, direct rein steering when turning
+    // Direct rein steering with A/D; subtle gaze guidance only when looking forward & not aiming sideways
     if (Math.abs(steerInput) > 0.05) {
-      this.yaw -= steerInput * turnRate * dt;
+      const yawDelta = -steerInput * turnRate * dt;
+      this.yaw += yawDelta;
+      player.camYaw += yawDelta; // Rider's torso turns naturally with Bramble's shoulders
     } else if (forwardInput > 0.25 && this.speed > 1.2) {
-      // Gently align horse toward camera look direction when holding straight forward
       let diff = player.camYaw - this.yaw;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      if (Math.abs(diff) < 1.15) {
-        this.yaw += diff * 0.85 * dt;
+      if (Math.abs(diff) < 0.62) {
+        this.yaw += diff * 0.72 * dt;
       }
     }
 
-    // Target speed & 4-gait progression (Walk -> Trot -> Canter -> Gallop)
     const inWater = this.surface.id === 'water';
     const canGallop = input.sprint && this.stamina > 0.08 && !inWater;
     let targetSpeed = 0;
 
     if (forwardInput > 0.08) {
-      if (canGallop) {
-        targetSpeed = 14.2 * (0.94 + this.bond * 0.10); // Sturdy Highland Garron full gallop
-      } else if (forwardInput > 0.65) {
-        targetSpeed = 8.4; // Brisk Highlands trot / light canter
-      } else {
-        targetSpeed = 3.8 * forwardInput / 0.65; // Unhurried frontier walk
-      }
+      if (canGallop) targetSpeed = 14.2 * (0.94 + this.bond * 0.10);
+      else if (forwardInput > 0.65) targetSpeed = 8.4;
+      else targetSpeed = 3.8 * (forwardInput / 0.65);
     } else if (forwardInput < -0.15) {
-      if (this.speed > 1.0) {
-        // Hard rein brake
-        targetSpeed = 0;
-      } else {
-        targetSpeed = -1.6; // Careful step backward
-      }
+      targetSpeed = this.speed > 1.0 ? 0 : -1.6;
     }
 
-    // Terrain & uphill weight (Highland Garrons are sure-footed on crags, slowed by deep peat & water)
     const fwdX = -Math.sin(this.yaw);
     const fwdZ = -Math.cos(this.yaw);
     const uphillDot = -(fwdX * n.x + fwdZ * n.z);
@@ -233,13 +204,11 @@ export class MountController {
     const accelRate = isBraking ? 6.8 : desiredSignedSpeed > this.speed ? 2.8 : 2.2;
     const signedSpeed = lerp(this.vx * fwdX + this.vz * fwdZ, desiredSignedSpeed, 1 - Math.exp(-accelRate * dt));
 
-    // Preserve subtle lateral drift/inertia on wet mud & steep slopes
     const grip = clamp(this.surface.traction * (1 - rainIntensity * 0.22), 0.35, 0.98);
     const blend = 1 - Math.exp(-6.5 * grip * dt);
     this.vx = lerp(this.vx, fwdX * signedSpeed, blend);
     this.vz = lerp(this.vz, fwdZ * signedSpeed, blend);
 
-    // Jump over dry-stone dykes & boulders
     if (input.jump && this.grounded && this.stamina > 0.16 && !inWater) {
       this.vy = 6.6;
       this.grounded = false;
@@ -249,23 +218,14 @@ export class MountController {
 
     this._integratePhysics(dt);
 
-    // Classify live gait for animation & HUD
     this.speed = Math.hypot(this.vx, this.vz);
-    if (signedSpeed < -0.25) {
-      this.gait = 'BACKING';
-    } else if (this.speed < 0.4) {
-      this.gait = 'IDLE';
-    } else if (this.speed < 4.6) {
-      this.gait = 'WALK';
-    } else if (this.speed < 9.0) {
-      this.gait = 'TROT';
-    } else if (this.speed < 11.8) {
-      this.gait = 'CANTER';
-    } else {
-      this.gait = 'GALLOP';
-    }
+    if (signedSpeed < -0.25) this.gait = 'BACKING';
+    else if (this.speed < 0.4) this.gait = 'IDLE';
+    else if (this.speed < 4.6) this.gait = 'WALK';
+    else if (this.speed < 9.0) this.gait = 'TROT';
+    else if (this.speed < 11.8) this.gait = 'CANTER';
+    else this.gait = 'GALLOP';
 
-    // Stamina & passive bond growth while riding together
     if (this.gait === 'GALLOP') {
       const bondEfficiency = lerp(1.0, 0.65, this.bond);
       const drain = (0.11 + slope * 0.32 + (this.surface.id === 'peat_bog' ? 0.10 : 0)) * bondEfficiency;
@@ -273,22 +233,19 @@ export class MountController {
     } else if (this.gait === 'CANTER') {
       this.stamina = clamp(this.stamina - 0.025 * dt, 0, 1);
     } else {
-      const regen = this.gait === 'IDLE' ? 0.20 : 0.09;
-      this.stamina = clamp(this.stamina + regen * dt, 0, 1);
+      this.stamina = clamp(this.stamina + (this.gait === 'IDLE' ? 0.20 : 0.09) * dt, 0, 1);
     }
 
-    if (this.speed > 1.5) {
-      this.bond = clamp(this.bond + 0.0008 * dt, 0, 1);
-    }
+    if (this.speed > 1.5) this.bond = clamp(this.bond + 0.0008 * dt, 0, 1);
 
-    // Seat Callum cleanly in Bramble's saddle
+    // Sync Callum's position to saddle while keeping facingYaw aligned with his First-Person eyes
     player.x = this.x;
     player.y = this.y + 1.08;
     player.z = this.z;
     player.vx = this.vx;
     player.vz = this.vz;
     player.speed = this.speed;
-    player.facingYaw = this.yaw;
+    player.facingYaw = player.camYaw;
     player.crouchBlend = 0;
     player.surface = this.surface;
     player.stance = `RIDING · ${this.gait}`;
@@ -334,7 +291,6 @@ export class MountController {
         targetSpeed = 1.9;
       }
     } else if (this.aiTimer <= 0) {
-      // Alternate naturally between grazing heather/grass and meandering a few paces
       if (this.aiState === 'GRAZING' && this.rng() > 0.35) {
         const ang = this.rng() * Math.PI * 2;
         const r = 4.5 + this.rng() * 9.0;
@@ -379,7 +335,6 @@ export class MountController {
     this.z += this.vz * dt;
     this.y += this.vy * dt;
 
-    // Prevent horse from plunging past chest-deep sea-loch water
     const nextGroundY = heightAt(this.x, this.z);
     if (nextGroundY < WATER_LEVEL - 0.95) {
       this.x -= this.vx * dt;
