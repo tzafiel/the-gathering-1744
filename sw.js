@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gathering-1744-v5';
+const CACHE_NAME = 'gathering-1744-v6';
 
 const APP_SHELL = [
   './',
