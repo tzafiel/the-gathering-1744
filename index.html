@@ -40,6 +40,7 @@
         <span id="stance-pill">STANDING</span>
         <span id="surface-pill">HEATHER</span>
         <span id="wetness-pill">DRY</span>
+        <span id="weather-pill">SUNBREAK</span>
       </div>
     </div>
 
@@ -56,7 +57,7 @@
     <div class="panel">
       <div class="eyebrow">LOCHABER · SUMMER 1744</div>
       <h1>THE GATHERING</h1>
-      <p class="subtitle">Callum MacRae · Vertical Slice · Commit 1</p>
+      <p class="subtitle">Callum MacRae · Romantic Oil Engine · Commit 2.0</p>
 
       <div class="controls-grid">
         <div><strong>Move</strong><span>WASD / Left Stick</span></div>
@@ -65,6 +66,7 @@
         <div><strong>Crouch</strong><span>C or Ctrl / B</span></div>
         <div><strong>Jump</strong><span>Space / Y</span></div>
         <div><strong>Sun Clock</strong><span>[ and ] Keys</span></div>
+        <div><strong>Weather</strong><span>V / D-Pad Up</span></div>
         <div><strong>Pause &amp; Save</strong><span>Esc / Start</span></div>
       </div>
 
@@ -79,7 +81,7 @@
         <input id="file-import" type="file" accept="application/json" class="hidden" />
       </div>
 
-      <div id="overlay-status">Loading engine modules...</div>
+      <div id="overlay-status">Loading ONIX oil shaders...</div>
     </div>
   </div>
 
@@ -96,7 +98,6 @@
     </div>
   </div>
 
-  <!-- Boot diagnostics so module/path errors are always visible on-screen -->
   <script>
     (function () {
       const showErr = (msg) => {
@@ -106,14 +107,14 @@
         el.classList.remove('hidden');
       };
       window.addEventListener('error', (e) => {
-        showErr(`Runtime Error: ${e.message || 'Module failed to load (open F12 Console for file path).'}`);
+        showErr(`Runtime Error: ${e.message || 'Module failed to load (open F12 Console).'}`);
       });
       window.addEventListener('unhandledrejection', (e) => {
         showErr(`Async Error: ${e.reason?.message || e.reason || 'Promise rejected'}`);
       });
       setTimeout(() => {
         if (!window.__GATHERING_BOOTED) {
-          showErr('Engine module did not start. Press F12 -> Console to check for a 404 filename mismatch (case-sensitive: worldState.js, worldRenderer.js).');
+          showErr('Engine module did not start. Press F12 -> Console to check for a 404 filename mismatch.');
         }
       }, 4500);
     })();
