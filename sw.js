@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gathering-1744-v2';
+const CACHE_NAME = 'gathering-1744-v3';
 
 const APP_SHELL = [
   './',
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './src/world/terrain.js',
   './src/world/worldState.js',
   './src/sim/player.js',
+  './src/render/textures.js',
   './src/render/worldRenderer.js'
 ];
 
