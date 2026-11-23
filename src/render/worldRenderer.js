@@ -20,6 +20,8 @@ import {
 } from './onixShaders.js';
 import { PainterlyPost } from './painterlyPost.js';
 import { BrambleRig } from './mountMesh.js';
+import { RedcoatRenderer } from './redcoatMesh.js';
+import { CombatFX } from './combatFX.js';
 
 const CHUNK_SIZE = 120;
 const CHUNK_RADIUS = 4;
@@ -63,15 +65,12 @@ function mergeNonIndexedGeos(geos) {
 function createPainterlyPineBoughTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   const rng = mulberry32(41744);
   ctx.clearRect(0, 0, size, size);
 
-  const cx = size * 0.5;
-  const cy = size * 0.52;
-
+  const cx = size * 0.5, cy = size * 0.52;
   ctx.strokeStyle = '#3b2518';
   ctx.lineCap = 'round';
   for (let b = 0; b < 7; b++) {
@@ -80,12 +79,7 @@ function createPainterlyPineBoughTexture(aniso = 8) {
     ctx.lineWidth = 3.6;
     ctx.beginPath();
     ctx.moveTo(cx, cy + 16);
-    ctx.quadraticCurveTo(
-      cx + Math.cos(a) * len * 0.5,
-      cy + Math.sin(a) * len * 0.35,
-      cx + Math.cos(a) * len,
-      cy + Math.sin(a) * len
-    );
+    ctx.quadraticCurveTo(cx + Math.cos(a) * len * 0.5, cy + Math.sin(a) * len * 0.35, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
     ctx.stroke();
   }
 
@@ -102,7 +96,6 @@ function createPainterlyPineBoughTexture(aniso = 8) {
       const r = Math.round(lerp(20, 70, sunBias) + (rng() - 0.5) * 14);
       const g = Math.round(lerp(40, 96, sunBias) + (rng() - 0.5) * 18);
       const b = Math.round(lerp(26, 44, sunBias) + (rng() - 0.5) * 10);
-
       ctx.strokeStyle = `rgb(${r},${g},${b})`;
       ctx.lineWidth = 2.4 + rng() * 1.6;
       ctx.beginPath();
@@ -122,8 +115,7 @@ function createPainterlyPineBoughTexture(aniso = 8) {
 function createPainterlyGrassTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   const rng = mulberry32(51744);
   ctx.clearRect(0, 0, size, size);
@@ -162,8 +154,7 @@ function createPainterlyGrassTexture(aniso = 8) {
 function createPainterlyHeatherSprigTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   const rng = mulberry32(81744);
   ctx.clearRect(0, 0, size, size);
@@ -192,26 +183,12 @@ function createPainterlyHeatherSprigTexture(aniso = 8) {
       const py = omt * omt * size + 2 * omt * t * my + t * t * ey;
 
       if (hasFlower && t > 0.36) {
-        const r = Math.round(126 + rng() * 68);
-        const g = Math.round(48 + rng() * 38);
-        const b = Math.round(112 + rng() * 64);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillStyle = `rgb(${Math.round(126 + rng() * 68)},${Math.round(48 + rng() * 38)},${Math.round(112 + rng() * 64)})`;
         ctx.beginPath();
-        ctx.ellipse(
-          px + (rng() - 0.5) * 14,
-          py + (rng() - 0.5) * 10,
-          4.0 + rng() * 4.8,
-          2.6 + rng() * 3.2,
-          rng() * Math.PI,
-          0,
-          Math.PI * 2
-        );
+        ctx.ellipse(px + (rng() - 0.5) * 14, py + (rng() - 0.5) * 10, 4.0 + rng() * 4.8, 2.6 + rng() * 3.2, rng() * Math.PI, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        const r = Math.round(48 + rng() * 28);
-        const g = Math.round(70 + rng() * 34);
-        const b = Math.round(30 + rng() * 18);
-        ctx.strokeStyle = `rgb(${r},${g},${b})`;
+        ctx.strokeStyle = `rgb(${Math.round(48 + rng() * 28)},${Math.round(70 + rng() * 34)},${Math.round(30 + rng() * 18)})`;
         ctx.lineWidth = 2.6;
         const a = -Math.PI * 0.5 + (rng() - 0.5) * 1.9;
         ctx.beginPath();
@@ -247,20 +224,13 @@ function createFeatheredTuftGeometry(width, height, cardCount = 3) {
     g.rotateY((c / cardCount) * Math.PI + c * 0.18);
 
     for (let i = 0; i < pos.count; i++) {
-      const px = pos.getX(i);
-      const py = pos.getY(i);
-      const pz = pos.getZ(i);
-      const nx = px * 0.35;
-      const ny = 1.0;
-      const nz = pz * 0.35;
+      const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+      const nx = px * 0.35, ny = 1.0, nz = pz * 0.35;
       const inv = 1 / Math.hypot(nx, ny, nz);
       norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
 
-      const yNorm = clamp(py / height, 0, 1);
-      const shade = lerp(0.84, 1.08, yNorm);
-      cols[i * 3] = shade;
-      cols[i * 3 + 1] = shade;
-      cols[i * 3 + 2] = shade;
+      const shade = lerp(0.84, 1.08, clamp(py / height, 0, 1));
+      cols[i * 3] = shade; cols[i * 3 + 1] = shade; cols[i * 3 + 2] = shade;
     }
     g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
     planes.push(g);
@@ -296,17 +266,12 @@ function createScotsPineWoodGeometry() {
     const startY = tip.y - 1.45;
     const startX = Math.sin(startY * 0.42) * 0.34 + startY * 0.045;
     const startZ = Math.cos(startY * 0.36) * 0.20;
-
-    const dx = tip.x - startX;
-    const dy = tip.y - startY;
-    const dz = tip.z - startZ;
+    const dx = tip.x - startX, dy = tip.y - startY, dz = tip.z - startZ;
     const len = Math.hypot(dx, dy, dz);
 
     const limb = new THREE.CylinderGeometry(0.06, 0.14, len, 6);
     limb.translate(0, len * 0.5, 0);
-    const dir = new THREE.Vector3(dx, dy, dz).normalize();
-    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    limb.applyQuaternion(quat);
+    limb.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz).normalize()));
     limb.translate(startX, startY, startZ);
     parts.push(limb);
   }
@@ -321,63 +286,63 @@ function createScotsPineCanopyFeatheredGeometry() {
     for (let k = 0; k < 6; k++) {
       const sz = cluster.r * (0.88 + rng() * 0.42);
       const g = new THREE.PlaneGeometry(sz, sz * 0.86);
+      g.rotateX(k === 0 ? -Math.PI * 0.42 : (rng() - 0.5) * 1.15);
+      g.rotateZ((rng() - 0.5) * 0.55);
+      g.rotateY((k / 6) * Math.PI * 2 + rng() * 0.7);
+      g.translate(cluster.x + (rng() - 0.5) * 1.1, cluster.y + (rng() - 0.5) * 0.68, cluster.z + (rng() - 0.5) * 1.1);
 
-      const ox = cluster.x + (rng() - 0.5) * 1.1;
-      const oy = cluster.y + (rng() - 0.5) * 0.68;
-      const oz = cluster.z + (rng() - 0.5) * 1.1;
-
-      const pitch = k === 0 ? -Math.PI * 0.42 : (rng() - 0.5) * 1.15;
-      const yaw = (k / 6) * Math.PI * 2 + rng() * 0.7;
-      const roll = (rng() - 0.5) * 0.55;
-
-      g.rotateX(pitch);
-      g.rotateZ(roll);
-      g.rotateY(yaw);
-      g.translate(ox, oy, oz);
-
-      const pos = g.attributes.position;
-      const norm = g.attributes.normal;
+      const pos = g.attributes.position, norm = g.attributes.normal;
       const cols = new Float32Array(pos.count * 3);
-
       for (let i = 0; i < pos.count; i++) {
-        const px = pos.getX(i);
-        const py = pos.getY(i);
-        const pz = pos.getZ(i);
-
-        const nx = px;
-        const ny = (py - 5.5) * 1.4 + 1.1;
-        const nz = pz;
+        const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+        const nx = px, ny = (py - 5.5) * 1.4 + 1.1, nz = pz;
         const inv = 1 / (Math.hypot(nx, ny, nz) || 1);
         norm.setXYZ(i, nx * inv, ny * inv, nz * inv);
 
-        const crownLift = clamp((py - 4.8) / 3.8, 0, 1);
-        const shade = lerp(0.54, 1.16, crownLift);
-        cols[i * 3] = shade;
-        cols[i * 3 + 1] = shade;
-        cols[i * 3 + 2] = shade;
+        const shade = lerp(0.54, 1.16, clamp((py - 4.8) / 3.8, 0, 1));
+        cols[i * 3] = shade; cols[i * 3 + 1] = shade; cols[i * 3 + 2] = shade;
       }
       g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
       cards.push(g);
     }
   }
-
   return mergeNonIndexedGeos(cards);
 }
 
 function createGableRoofGeometry(width, depth, ridgeHeight) {
-  const hw = width * 0.5;
-  const hd = depth * 0.5;
+  const hw = width * 0.5, hd = depth * 0.5;
   const shape = new THREE.Shape();
-  shape.moveTo(-hd, 0);
-  shape.lineTo(0, ridgeHeight);
-  shape.lineTo(hd, 0);
-  shape.closePath();
-
+  shape.moveTo(-hd, 0); shape.lineTo(0, ridgeHeight); shape.lineTo(hd, 0); shape.closePath();
   const geo = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: false });
   geo.translate(0, 0, -hw);
   geo.rotateY(Math.PI / 2);
   geo.computeVertexNormals();
   return geo;
+}
+
+// Studded Highland Oak Targe mesh helper (used on Callum's forearm AND slung on his back)
+function createTargeMesh(oakMat, ironMat, brassMat) {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.045, 16), oakMat);
+  disc.rotation.x = Math.PI / 2;
+  disc.castShadow = true;
+  g.add(disc);
+
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.022, 6, 18), ironMat);
+  g.add(rim);
+
+  const boss = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.11, 8), ironMat);
+  boss.rotation.x = Math.PI / 2;
+  boss.position.z = 0.06;
+  g.add(boss);
+
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const stud = new THREE.Mesh(new THREE.SphereGeometry(0.018, 5, 5), brassMat);
+    stud.position.set(Math.cos(a) * 0.22, Math.sin(a) * 0.22, 0.026);
+    g.add(stud);
+  }
+  return g;
 }
 
 export class WorldRenderer {
@@ -421,7 +386,7 @@ export class WorldRenderer {
       powerPreference: 'high-performance'
     });
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -457,15 +422,13 @@ export class WorldRenderer {
     this.bramble = new BrambleRig(this.plaidMat);
     this.scene.add(this.bramble.root);
 
+    this.redcoatRenderer = new RedcoatRenderer(this.scene);
+    this.combatFX = new CombatFX(this.scene);
     this.post = new PainterlyPost(this.renderer);
   }
 
-  toggleOilMode() {
-    return this.post ? this.post.toggleOilMode() : true;
-  }
-
   getBackendName() {
-    return this.post?.oilStrength > 0.5 ? 'ONIX OIL ENGINE' : 'ONIX RAW HDR';
+    return 'ONIX HDR';
   }
 
   _setupSkyAndIBL() {
@@ -560,7 +523,7 @@ export class WorldRenderer {
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const envScene = new THREE.Scene();
-    const envSky = new THREE.Mesh(
+    envScene.add(new THREE.Mesh(
       new THREE.SphereGeometry(30, 16, 12),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
@@ -576,8 +539,7 @@ export class WorldRenderer {
           }
         `
       })
-    );
-    envScene.add(envSky);
+    ));
     this.envRT = pmrem.fromScene(envScene, 0.04);
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = 0.80;
@@ -613,10 +575,11 @@ export class WorldRenderer {
     this.scene.add(this.waterMesh);
   }
 
+  // Grounded 2.6 km Lochaber & Ardgour mountain ring with submerged loch channel (fixes grey water seam!)
   _buildDistantMountains() {
     const segAng = 108;
     const segRad = 22;
-    const rInner = 450;
+    const rInner = 530;
     const rOuter = 2650;
 
     const verts = [];
@@ -633,16 +596,17 @@ export class WorldRenderer {
 
         const baseH = heightAt(wx, wz);
         const outerFade = smoothstep(0.02, 0.55, t);
-        const seamTuck = ir === 0 ? -1.8 : 0.0;
+        const seamTuck = ir === 0 ? -3.0 : 0.0;
 
-        const farWestShore = smoothstep(-740, -1280, wx);
+        const farWestShore = smoothstep(-860, -1380, wx);
         const macroPeaks = ridgeNoise2D(wx * 0.00085, wz * 0.00085, 4, 2744) * 320;
         const subRidges = fbm2D(wx * 0.0022, wz * 0.0022, 3, 3744) * 62;
 
         let wy;
         if (wx < -220) {
-          const ardgourPeak = (macroPeaks * 0.78 + subRidges * 0.5 + 48) * farWestShore;
-          wy = lerp(baseH, -12.0 + ardgourPeak, outerFade) + seamTuck;
+          // Keep open Loch Linnhe firmly submerged (-14m) until far Ardgour mountains rise on the far western shore
+          const ardgourPeak = (macroPeaks * 0.78 + subRidges * 0.5 + 54) * farWestShore;
+          wy = -14.0 + ardgourPeak * outerFade;
         } else {
           const eastBoost = lerp(0.72, 1.20, smoothstep(-220, 950, wx));
           wy = baseH + (macroPeaks * eastBoost + subRidges + 32) * outerFade + seamTuck;
@@ -668,7 +632,6 @@ export class WorldRenderer {
     geo.computeVertexNormals();
 
     this.horizonMesh = new THREE.Mesh(geo, this.horizonMat);
-    this.horizonMesh.receiveShadow = false;
     this.scene.add(this.horizonMesh);
   }
 
@@ -686,81 +649,50 @@ export class WorldRenderer {
     this.smokeSources = [];
 
     for (const b of bothies) {
-      const bx = cl.x + b.dx;
-      const bz = cl.z + b.dz;
-      const by = heightAt(bx, bz);
+      const bx = cl.x + b.dx, bz = cl.z + b.dz, by = heightAt(bx, bz);
       const group = new THREE.Group();
       group.position.set(bx, by, bz);
       group.rotation.y = b.rot;
 
       const walls = new THREE.Mesh(new THREE.BoxGeometry(b.w, 2.7, b.d), this.stoneMat);
-      walls.position.y = 1.15;
-      walls.castShadow = true;
-      walls.receiveShadow = true;
+      walls.position.y = 1.15; walls.castShadow = true; walls.receiveShadow = true;
       group.add(walls);
 
       const gableWalls = new THREE.Mesh(createGableRoofGeometry(b.w - 0.1, b.d - 0.1, 2.25), this.stoneMat);
-      gableWalls.position.y = 2.48;
-      gableWalls.castShadow = true;
-      gableWalls.receiveShadow = true;
+      gableWalls.position.y = 2.48; gableWalls.castShadow = true; gableWalls.receiveShadow = true;
       group.add(gableWalls);
 
       const roof = new THREE.Mesh(createGableRoofGeometry(b.w + 0.85, b.d + 0.95, 2.55), this.thatchMat);
-      roof.position.y = 2.38;
-      roof.castShadow = true;
-      roof.receiveShadow = true;
+      roof.position.y = 2.38; roof.castShadow = true; roof.receiveShadow = true;
       group.add(roof);
 
       const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.9, 0.95), this.darkStoneMat);
-      chimney.position.set(b.w * 0.34, 4.4, 0);
-      chimney.castShadow = true;
+      chimney.position.set(b.w * 0.34, 4.4, 0); chimney.castShadow = true;
       group.add(chimney);
 
-      const chLocalX = b.w * 0.34;
-      this.smokeSources.push({
-        x: bx + chLocalX * Math.cos(b.rot),
-        y: by + 5.35,
-        z: bz - chLocalX * Math.sin(b.rot)
-      });
+      this.smokeSources.push({ x: bx + b.w * 0.34 * Math.cos(b.rot), y: by + 5.35, z: bz - b.w * 0.34 * Math.sin(b.rot) });
 
       const door = new THREE.Mesh(new THREE.BoxGeometry(1.12, 1.9, 0.24), this.barkMat);
       door.position.set(0, 0.9, b.d * 0.5 + 0.02);
-      group.add(door);
-
       const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.28, 0.36), this.darkStoneMat);
       lintel.position.set(0, 1.98, b.d * 0.5 + 0.06);
-      group.add(lintel);
-
       const winFrame = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.86, 0.16), this.darkStoneMat);
       winFrame.position.set(b.w * 0.26, 1.38, b.d * 0.5);
-      group.add(winFrame);
-
       const winGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.62), winGlowMat);
       winGlow.position.set(b.w * 0.26, 1.38, b.d * 0.5 + 0.09);
-      group.add(winGlow);
-
+      group.add(door, lintel, winFrame, winGlow);
       this.scene.add(group);
     }
 
-    const dykeArcs = [
-      { a0: 0.3, a1: 1.4, r: 21 },
-      { a0: 2.1, a1: 3.5, r: 22 },
-      { a0: 4.1, a1: 5.4, r: 20 }
-    ];
-    for (const arc of dykeArcs) {
-      const steps = 6;
-      for (let i = 0; i < steps; i++) {
-        const t0 = lerp(arc.a0, arc.a1, i / steps);
-        const t1 = lerp(arc.a0, arc.a1, (i + 1) / steps);
+    for (const arc of [{ a0: 0.3, a1: 1.4, r: 21 }, { a0: 2.1, a1: 3.5, r: 22 }, { a0: 4.1, a1: 5.4, r: 20 }]) {
+      for (let i = 0; i < 6; i++) {
+        const t0 = lerp(arc.a0, arc.a1, i / 6), t1 = lerp(arc.a0, arc.a1, (i + 1) / 6);
         const mid = (t0 + t1) * 0.5;
-        const wx = cl.x + Math.cos(mid) * arc.r;
-        const wz = cl.z + Math.sin(mid) * arc.r;
-        const wy = heightAt(wx, wz);
+        const wx = cl.x + Math.cos(mid) * arc.r, wz = cl.z + Math.sin(mid) * arc.r;
         const wall = new THREE.Mesh(new THREE.BoxGeometry(arc.r * (t1 - t0) + 0.35, 1.18, 0.68), this.darkStoneMat);
-        wall.position.set(wx, wy + 0.44, wz);
+        wall.position.set(wx, heightAt(wx, wz) + 0.44, wz);
         wall.rotation.y = -mid + Math.PI / 2;
-        wall.castShadow = true;
-        wall.receiveShadow = true;
+        wall.castShadow = true; wall.receiveShadow = true;
         this.scene.add(wall);
       }
     }
@@ -770,8 +702,7 @@ export class WorldRenderer {
       const a = (i / 9) * Math.PI * 2;
       const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), this.boulderMat);
       st.position.set(cl.x + Math.cos(a) * 1.05, fireY + 0.14, cl.z + Math.sin(a) * 1.05);
-      st.scale.set(1.15, 0.72, 1.15);
-      st.castShadow = true;
+      st.scale.set(1.15, 0.72, 1.15); st.castShadow = true;
       this.scene.add(st);
     }
     for (let i = 0; i < 4; i++) {
@@ -791,68 +722,42 @@ export class WorldRenderer {
     this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 22, phase: 0.4 });
     this.smokeSources.push({ x: cl.x, y: fireY + 0.9, z: cl.z });
 
-    const tw = LANDMARKS.watchtower;
-    const twY = heightAt(tw.x, tw.z);
+    const tw = LANDMARKS.watchtower, twY = heightAt(tw.x, tw.z);
     const towerGroup = new THREE.Group();
     towerGroup.position.set(tw.x, twY, tw.z);
 
     const keepPlinth = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 6.6, 3.2, 4), this.darkStoneMat);
-    keepPlinth.rotation.y = Math.PI / 4;
-    keepPlinth.position.y = 1.1;
-    keepPlinth.castShadow = true;
-    keepPlinth.receiveShadow = true;
-    towerGroup.add(keepPlinth);
-
+    keepPlinth.rotation.y = Math.PI / 4; keepPlinth.position.y = 1.1; keepPlinth.castShadow = true; keepPlinth.receiveShadow = true;
     const keepShaft = new THREE.Mesh(new THREE.BoxGeometry(7.6, 12.2, 7.6), this.stoneMat);
-    keepShaft.position.y = 8.4;
-    keepShaft.castShadow = true;
-    keepShaft.receiveShadow = true;
-    towerGroup.add(keepShaft);
-
+    keepShaft.position.y = 8.4; keepShaft.castShadow = true; keepShaft.receiveShadow = true;
     const corbel = new THREE.Mesh(new THREE.BoxGeometry(8.5, 1.2, 8.5), this.darkStoneMat);
-    corbel.position.y = 14.8;
-    corbel.castShadow = true;
-    towerGroup.add(corbel);
+    corbel.position.y = 14.8; corbel.castShadow = true;
+    towerGroup.add(keepPlinth, keepShaft, corbel);
 
     for (const p of [-3.6, -1.2, 1.2, 3.6]) {
       for (const s of [-3.9, 3.9]) {
         const m1 = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.15, 0.72), this.stoneMat);
-        m1.position.set(p, 15.9, s);
-        m1.castShadow = true;
-        towerGroup.add(m1);
-
+        m1.position.set(p, 15.9, s); m1.castShadow = true;
         const m2 = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.15, 1.35), this.stoneMat);
-        m2.position.set(s, 15.9, p);
-        m2.castShadow = true;
-        towerGroup.add(m2);
+        m2.position.set(s, 15.9, p); m2.castShadow = true;
+        towerGroup.add(m1, m2);
       }
     }
 
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6.8, 6), this.barkMat);
     pole.position.set(0, 18.4, 0);
-    towerGroup.add(pole);
-
-    this.towerFlag = new THREE.Mesh(
-      new THREE.BoxGeometry(2.9, 1.4, 0.06),
-      new THREE.MeshStandardMaterial({ color: 0x851c1a, roughness: 0.86 })
-    );
+    this.towerFlag = new THREE.Mesh(new THREE.BoxGeometry(2.9, 1.4, 0.06), new THREE.MeshStandardMaterial({ color: 0x851c1a, roughness: 0.86 }));
     this.towerFlag.position.set(1.45, 20.8, 0);
-    towerGroup.add(this.towerFlag);
+    towerGroup.add(pole, this.towerFlag);
 
-    const beaconCoords = [
-      { x: 0, y: 15.8, z: 0, power: 38 },
-      { x: -6.2, y: 2.4, z: 3.4, power: 28 },
-      { x: 6.0, y: 2.2, z: -2.8, power: 28 }
-    ];
-    for (let i = 0; i < beaconCoords.length; i++) {
-      const bc = beaconCoords[i];
+    const beacons = [{ x: 0, y: 15.8, z: 0, power: 38 }, { x: -6.2, y: 2.4, z: 3.4, power: 28 }, { x: 6.0, y: 2.2, z: -2.8, power: 28 }];
+    for (let i = 0; i < beacons.length; i++) {
+      const bc = beacons[i];
       const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.36, 1.25, 6), this.darkStoneMat);
       stand.position.set(bc.x, bc.y, bc.z);
-      towerGroup.add(stand);
-
       const bFlame = new THREE.Mesh(new THREE.ConeGeometry(0.52, 1.25, 6), emberMat);
       bFlame.position.set(bc.x, bc.y + 1.0, bc.z);
-      towerGroup.add(bFlame);
+      towerGroup.add(stand, bFlame);
 
       const bLight = new THREE.PointLight(0xff8424, bc.power, 72, 1.45);
       bLight.position.set(tw.x + bc.x, twY + bc.y + 1.6, tw.z + bc.z);
@@ -864,48 +769,35 @@ export class WorldRenderer {
 
     const jt = LANDMARKS.coveJetty;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 3.2), this.barkMat);
-    deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z);
-    deck.castShadow = true;
-    deck.receiveShadow = true;
+    deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z); deck.castShadow = true; deck.receiveShadow = true;
     this.scene.add(deck);
-
     for (let i = -5; i <= 5; i += 2.5) {
       for (const pz of [-1.2, 1.2]) {
         const post = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 3.8, 6), this.barkMat);
-        post.position.set(jt.x - 4 + i, WATER_LEVEL - 0.3, jt.z + pz);
-        post.castShadow = true;
+        post.position.set(jt.x - 4 + i, WATER_LEVEL - 0.3, jt.z + pz); post.castShadow = true;
         this.scene.add(post);
       }
     }
 
-    const cr = LANDMARKS.stashCairn;
-    const crY = heightAt(cr.x, cr.z);
+    const cr = LANDMARKS.stashCairn, crY = heightAt(cr.x, cr.z);
     for (let layer = 0; layer < 4; layer++) {
-      const r = 1.4 - layer * 0.32;
-      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 1), this.boulderMat);
+      const st = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4 - layer * 0.32, 1), this.boulderMat);
       st.position.set(cr.x, crY + 0.45 + layer * 0.5, cr.z);
-      st.scale.set(1.1, 0.62, 1.1);
-      st.rotation.y = layer * 1.1;
-      st.castShadow = true;
-      st.receiveShadow = true;
+      st.scale.set(1.1, 0.62, 1.1); st.rotation.y = layer * 1.1; st.castShadow = true; st.receiveShadow = true;
       this.scene.add(st);
     }
 
     for (let mz = -360; mz <= 360; mz += 120) {
       const mx = roadCenterX(mz) + 5.2;
-      const my = heightAt(mx, mz);
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.45, 0.42), this.stoneMat);
-      post.position.set(mx, my + 0.65, mz);
-      post.castShadow = true;
+      post.position.set(mx, heightAt(mx, mz) + 0.65, mz); post.castShadow = true;
       this.scene.add(post);
     }
   }
 
   _buildInstancedTreesAndRocks() {
     const rng = mulberry32(174401);
-    const maxPines = 600;
-    const maxRocks = 560;
-
+    const maxPines = 600, maxRocks = 560;
     const trunkGeo = createScotsPineWoodGeometry();
     const crownGeo = createScotsPineCanopyFeatheredGeometry();
     const crownMat = createOnixFoliageMaterial(this.sharedUniforms, { kind: 'pine', map: this.pineBoughTex });
@@ -922,26 +814,19 @@ export class WorldRenderer {
     const trunks = new THREE.InstancedMesh(trunkGeo, this.barkMat, maxPines);
     const crowns = new THREE.InstancedMesh(crownGeo, crownMat, maxPines);
     const rocks = new THREE.InstancedMesh(rockGeo, this.boulderMat, maxRocks);
-
-    trunks.castShadow = true; trunks.receiveShadow = true;
-    crowns.castShadow = true; crowns.receiveShadow = true;
-    rocks.castShadow = true; rocks.receiveShadow = true;
+    trunks.castShadow = trunks.receiveShadow = crowns.castShadow = crowns.receiveShadow = rocks.castShadow = rocks.receiveShadow = true;
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
 
     let pineCount = 0;
     for (let tries = 0; tries < 3800 && pineCount < maxPines; tries++) {
-      const x = (rng() - 0.5) * 980;
-      const z = (rng() - 0.5) * 980;
-      const y = heightAt(x, z);
+      const x = (rng() - 0.5) * 980, z = (rng() - 0.5) * 980, y = heightAt(x, z);
       if (y < 2.5 || y > 62) continue;
       if (Math.abs(x - roadCenterX(z)) < 11.5) continue;
       if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 34) continue;
       if (Math.hypot(x - LANDMARKS.watchtower.x, z - LANDMARKS.watchtower.z) < 26) continue;
-
-      const grove = fbm2D(x * 0.011, z * 0.011, 3, 9101);
-      if (grove < -0.14 && rng() > 0.16) continue;
+      if (fbm2D(x * 0.011, z * 0.011, 3, 9101) < -0.14 && rng() > 0.16) continue;
       if (1 - normalAt(x, z, 1.0).y > 0.27) continue;
 
       const scale = 0.92 + rng() * 1.25;
@@ -949,28 +834,20 @@ export class WorldRenderer {
       dummy.rotation.set((rng() - 0.5) * 0.10, rng() * Math.PI * 2, (rng() - 0.5) * 0.10);
       dummy.scale.set(scale, scale * (0.90 + rng() * 0.36), scale);
       dummy.updateMatrix();
-
       trunks.setMatrixAt(pineCount, dummy.matrix);
       crowns.setMatrixAt(pineCount, dummy.matrix);
       const tone = 0.78 + rng() * 0.32;
       color.setRGB(tone * 0.96, tone, tone * 0.92);
-      crowns.setColorAt(pineCount, color);
-      pineCount++;
+      crowns.setColorAt(pineCount++, color);
     }
-    trunks.count = pineCount; crowns.count = pineCount;
-    trunks.instanceMatrix.needsUpdate = true;
-    crowns.instanceMatrix.needsUpdate = true;
+    trunks.count = crowns.count = pineCount;
+    trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
 
     let rockCount = 0;
     for (let tries = 0; tries < 2200 && rockCount < maxRocks; tries++) {
-      const x = (rng() - 0.5) * 980;
-      const z = (rng() - 0.5) * 980;
-      const y = heightAt(x, z);
-      if (y < 0.2) continue;
-      if (Math.abs(x - roadCenterX(z)) < 6.5) continue;
-      if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 24) continue;
-
+      const x = (rng() - 0.5) * 980, z = (rng() - 0.5) * 980, y = heightAt(x, z);
+      if (y < 0.2 || Math.abs(x - roadCenterX(z)) < 6.5 || Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 24) continue;
       const sx = 0.65 + rng() * 2.6, sy = 0.38 + rng() * 1.45, sz = 0.65 + rng() * 2.6;
       dummy.position.set(x, y + sy * 0.14, z);
       dummy.rotation.set(rng() * 0.6, rng() * Math.PI * 2, rng() * 0.6);
@@ -987,19 +864,18 @@ export class WorldRenderer {
     const grassGeo = createFeatheredTuftGeometry(1.18, 0.64, 3);
     const heatherGeo = createFeatheredTuftGeometry(1.08, 0.56, 4);
 
-    const grassMat = createOnixFoliageMaterial(this.sharedUniforms, {
-      kind: 'grass', map: this.grassTex, fadeStart: 44.0, fadeEnd: 88.0
-    });
-    const heatherMat = createOnixFoliageMaterial(this.sharedUniforms, {
-      kind: 'heather', map: this.heatherSprigTex, fadeStart: 46.0, fadeEnd: 90.0
-    });
-
-    this.grassInst = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
-    this.heatherInst = new THREE.InstancedMesh(heatherGeo, heatherMat, MAX_HEATHER);
-    this.grassInst.receiveShadow = true;
-    this.heatherInst.receiveShadow = true;
-    this.grassInst.frustumCulled = false;
-    this.heatherInst.frustumCulled = false;
+    this.grassInst = new THREE.InstancedMesh(
+      grassGeo,
+      createOnixFoliageMaterial(this.sharedUniforms, { kind: 'grass', map: this.grassTex, fadeStart: 44.0, fadeEnd: 88.0 }),
+      MAX_GRASS
+    );
+    this.heatherInst = new THREE.InstancedMesh(
+      heatherGeo,
+      createOnixFoliageMaterial(this.sharedUniforms, { kind: 'heather', map: this.heatherSprigTex, fadeStart: 46.0, fadeEnd: 90.0 }),
+      MAX_HEATHER
+    );
+    this.grassInst.receiveShadow = this.heatherInst.receiveShadow = true;
+    this.grassInst.frustumCulled = this.heatherInst.frustumCulled = false;
     this.scene.add(this.grassInst, this.heatherInst);
   }
 
@@ -1007,15 +883,12 @@ export class WorldRenderer {
     const focusX = px - Math.sin(camYaw) * 28.0;
     const focusZ = pz - Math.cos(camYaw) * 28.0;
     if (Math.hypot(focusX - this.lastFoliageX, focusZ - this.lastFoliageZ) < 5.5) return;
-    this.lastFoliageX = focusX;
-    this.lastFoliageZ = focusZ;
+    this.lastFoliageX = focusX; this.lastFoliageZ = focusZ;
 
     const baseGX = Math.round(focusX / FOLIAGE_STEP);
     const baseGZ = Math.round(focusZ / FOLIAGE_STEP);
     const maxR = FOLIAGE_HALF_GRID * FOLIAGE_STEP;
-    const dummy = this.tmpDummy;
-    const col = this.tmpColor;
-
+    const dummy = this.tmpDummy, col = this.tmpColor;
     let gCount = 0, hCount = 0;
 
     for (let dz = -FOLIAGE_HALF_GRID; dz <= FOLIAGE_HALF_GRID; dz++) {
@@ -1028,19 +901,16 @@ export class WorldRenderer {
 
         const wy = heightAt(wx, wz);
         if (wy < WATER_LEVEL + 1.4 || wy > 56) continue;
-        if (Math.abs(wx - roadCenterX(wz)) < 4.9) continue;
-        if (Math.hypot(wx - LANDMARKS.clachan.x, wz - LANDMARKS.clachan.z) < 5.2) continue;
+        if (Math.abs(wx - roadCenterX(wz)) < 4.9 || Math.hypot(wx - LANDMARKS.clachan.x, wz - LANDMARKS.clachan.z) < 5.2) continue;
 
         const surf = surfaceAt(wx, wz);
         if (surf.id === 'granite' || surf.id === 'water' || surf.id === 'shingle') continue;
 
         const drift = fbm2D(wx * 0.024, wz * 0.024, 3, 17447);
-        const density = fbm2D(wx * 0.06, wz * 0.06, 2, 17448);
-        if (density < -0.34 && r3 < 0.65) continue;
+        if (fbm2D(wx * 0.06, wz * 0.06, 2, 17448) < -0.34 && r3 < 0.65) continue;
 
         const isHeather = surf.id === 'heather' ? r3 > 0.28 : (drift > 0.08 && wy > 4.0 && r3 > 0.36);
         const scale = 0.82 + r1 * 0.86;
-
         dummy.position.set(wx, wy - 0.06, wz);
         dummy.rotation.set(0, r2 * Math.PI * 2, 0);
         dummy.scale.set(scale, scale * (0.82 + r3 * 0.44), scale);
@@ -1062,10 +932,8 @@ export class WorldRenderer {
       }
     }
 
-    this.grassInst.count = gCount;
-    this.heatherInst.count = hCount;
-    this.grassInst.instanceMatrix.needsUpdate = true;
-    this.heatherInst.instanceMatrix.needsUpdate = true;
+    this.grassInst.count = gCount; this.heatherInst.count = hCount;
+    this.grassInst.instanceMatrix.needsUpdate = this.heatherInst.instanceMatrix.needsUpdate = true;
     if (this.grassInst.instanceColor) this.grassInst.instanceColor.needsUpdate = true;
     if (this.heatherInst.instanceColor) this.heatherInst.instanceColor.needsUpdate = true;
   }
@@ -1078,15 +946,12 @@ export class WorldRenderer {
     g.addColorStop(0, 'rgba(215,212,204,0.56)');
     g.addColorStop(0.5, 'rgba(170,174,178,0.22)');
     g.addColorStop(1, 'rgba(145,150,156,0.0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
     const smokeTex = new THREE.CanvasTexture(c);
 
     for (const src of this.smokeSources || []) {
       for (let i = 0; i < 9; i++) {
-        const sprite = new THREE.Sprite(
-          new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0.34, depthWrite: false })
-        );
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0.34, depthWrite: false }));
         this.scene.add(sprite);
         this.smokeParticles.push({ sprite, src, age: i / 9, speed: 0.13 + (i % 4) * 0.025, seed: i * 1.9 });
       }
@@ -1103,10 +968,7 @@ export class WorldRenderer {
     }
     const rainGeo = new THREE.BufferGeometry();
     rainGeo.setAttribute('position', new THREE.BufferAttribute(this.rainPositions, 3));
-    this.rainLines = new THREE.LineSegments(
-      rainGeo,
-      new THREE.LineBasicMaterial({ color: 0xb6c6d4, transparent: true, opacity: 0.36, depthWrite: false })
-    );
+    this.rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xb6c6d4, transparent: true, opacity: 0.36, depthWrite: false }));
     this.rainLines.frustumCulled = false;
     this.rainLines.visible = false;
     this.scene.add(this.rainLines);
@@ -1121,7 +983,10 @@ export class WorldRenderer {
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xc29372, roughness: 0.78 });
     const bonnetMat = new THREE.MeshStandardMaterial({ color: 0x1a2634, roughness: 0.94 });
     const hairMat = new THREE.MeshStandardMaterial({ color: 0x241811, roughness: 0.9 });
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0xb4bec7, roughness: 0.25, metalness: 0.88 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x626a72, roughness: 0.42, metalness: 0.85 });
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0xc49c48, roughness: 0.35, metalness: 0.85 });
+    const oakMat = new THREE.MeshStandardMaterial({ color: 0x472f1c, roughness: 0.84 });
+    this.swordBladeMat = new THREE.MeshStandardMaterial({ color: 0xc6d0d8, roughness: 0.22, metalness: 0.92 });
 
     this.callumBody = new THREE.Group();
     this.callum.add(this.callumBody);
@@ -1129,76 +994,111 @@ export class WorldRenderer {
     const legGeo = new THREE.CapsuleGeometry(0.088, 0.62, 5, 8);
     legGeo.translate(0, -0.36, 0);
     this.leftLeg = new THREE.Mesh(legGeo, leatherMat);
-    this.leftLeg.position.set(-0.13, 0.82, 0);
-    this.leftLeg.castShadow = true;
-
+    this.leftLeg.position.set(-0.13, 0.82, 0); this.leftLeg.castShadow = true;
     this.rightLeg = new THREE.Mesh(legGeo, leatherMat);
-    this.rightLeg.position.set(0.13, 0.82, 0);
-    this.rightLeg.castShadow = true;
+    this.rightLeg.position.set(0.13, 0.82, 0); this.rightLeg.castShadow = true;
     this.callumBody.add(this.leftLeg, this.rightLeg);
 
     const kilt = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.31, 0.54, 14), this.plaidMat);
-    kilt.position.y = 0.86;
-    kilt.castShadow = true;
-    this.callumBody.add(kilt);
-
+    kilt.position.y = 0.86; kilt.castShadow = true;
     const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.09, 12), leatherMat);
     belt.position.y = 1.07;
-    this.callumBody.add(belt);
-
     const sporran = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.19, 0.08), leatherMat);
     sporran.position.set(0, 0.92, -0.25);
-    this.callumBody.add(sporran);
-
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.32, 6, 10), woolCoatMat);
-    torso.scale.set(1.12, 1.0, 0.72);
-    torso.position.y = 1.34;
-    torso.castShadow = true;
-    this.callumBody.add(torso);
-
+    torso.scale.set(1.12, 1.0, 0.72); torso.position.y = 1.34; torso.castShadow = true;
     const plaidWrap = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.52, 12, 1, false, 0, Math.PI * 1.35), this.plaidMat);
-    plaidWrap.position.set(-0.04, 1.36, 0.02);
-    plaidWrap.rotation.z = -0.34;
-    plaidWrap.castShadow = true;
-    this.callumBody.add(plaidWrap);
-
+    plaidWrap.position.set(-0.04, 1.36, 0.02); plaidWrap.rotation.z = -0.34; plaidWrap.castShadow = true;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 12), skinMat);
-    head.position.y = 1.77;
-    head.castShadow = true;
-    this.callumBody.add(head);
-
+    head.position.y = 1.77; head.castShadow = true;
     const hair = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
-    hair.position.set(0, 1.78, 0.02);
-    hair.rotation.x = 0.35;
-    this.callumBody.add(hair);
-
+    hair.position.set(0, 1.78, 0.02); hair.rotation.x = 0.35;
     const bonnet = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.15, 0.09, 12), bonnetMat);
-    bonnet.position.set(0.02, 1.9, 0.0);
-    bonnet.rotation.z = -0.16;
-    bonnet.castShadow = true;
-    this.callumBody.add(bonnet);
+    bonnet.position.set(0.02, 1.9, 0.0); bonnet.rotation.z = -0.16; bonnet.castShadow = true;
+    this.callumBody.add(kilt, belt, sporran, torso, plaidWrap, head, hair, bonnet);
 
+    // Hip Scabbard & Sheathed Hilt (visible when sword is holstered)
+    const scabbard = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.022, 1.06, 6), leatherMat);
+    scabbard.position.set(-0.29, 0.92, 0.14); scabbard.rotation.x = 0.68; scabbard.rotation.z = 0.16;
+    this.hipSwordHilt = new THREE.Mesh(new THREE.SphereGeometry(0.078, 8, 8), ironMat);
+    this.hipSwordHilt.position.set(-0.24, 1.24, -0.2);
+    this.callumBody.add(scabbard, this.hipSwordHilt);
+
+    // Physical Back Targe (slung squarely across Callum's spine for real rear armor!)
+    this.backTarge = createTargeMesh(oakMat, ironMat, brassMat);
+    this.backTarge.position.set(0, 1.34, 0.25);
+    this.callumBody.add(this.backTarge);
+
+    // Articulated Left & Right Arm Pivots
     const armGeo = new THREE.CapsuleGeometry(0.072, 0.48, 5, 8);
     armGeo.translate(0, -0.26, 0);
-    this.leftArm = new THREE.Mesh(armGeo, woolCoatMat);
-    this.leftArm.position.set(-0.3, 1.54, 0);
-    this.leftArm.castShadow = true;
 
-    this.rightArm = new THREE.Mesh(armGeo, woolCoatMat);
-    this.rightArm.position.set(0.3, 1.54, 0);
-    this.rightArm.castShadow = true;
+    this.leftArm = new THREE.Group();
+    this.leftArm.position.set(-0.30, 1.54, 0);
+    const lMesh = new THREE.Mesh(armGeo, woolCoatMat);
+    lMesh.castShadow = true;
+    this.leftArm.add(lMesh);
+
+    // Left Arm Targe (active front shield when Q is toggled)
+    this.armTarge = createTargeMesh(oakMat, ironMat, brassMat);
+    this.armTarge.position.set(-0.08, -0.34, -0.10);
+    this.armTarge.rotation.y = -Math.PI * 0.42;
+    this.leftArm.add(this.armTarge);
+
+    // Short Highland Hunting Bow (mounted in left hand when 'bow' equipped)
+    this.bowGroup = new THREE.Group();
+    this.bowGroup.position.set(0.02, -0.46, -0.12);
+    const bowStave = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.022, 6, 16, Math.PI * 0.85), oakMat);
+    bowStave.rotation.y = Math.PI / 2;
+    bowStave.rotation.z = -Math.PI * 0.42;
+    this.bowArrow = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.78, 5), oakMat);
+    this.bowArrow.rotation.x = Math.PI / 2;
+    this.bowArrow.position.set(0.04, 0, -0.25);
+    this.bowGroup.add(bowStave, this.bowArrow);
+    this.leftArm.add(this.bowGroup);
+
+    this.rightArm = new THREE.Group();
+    this.rightArm.position.set(0.30, 1.54, 0);
+    const rMesh = new THREE.Mesh(armGeo, woolCoatMat);
+    rMesh.castShadow = true;
+    this.rightArm.add(rMesh);
+
+    // Father's Basket-Hilted Broadsword (Primary)
+    this.swordGroup = new THREE.Group();
+    this.swordGroup.position.set(0, -0.48, -0.06);
+    const basket = new THREE.Mesh(new THREE.SphereGeometry(0.082, 8, 8), ironMat);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.18, 6), leatherMat);
+    grip.rotation.x = Math.PI / 2;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.012, 0.96), this.swordBladeMat);
+    blade.position.set(0, 0, -0.54); blade.castShadow = true;
+    this.swordGroup.add(basket, grip, blade);
+    this.rightArm.add(this.swordGroup);
+
+    // Belt Dirk / Biodag (Stealth)
+    this.dirkGroup = new THREE.Group();
+    this.dirkGroup.position.set(0, -0.48, -0.05);
+    const dirkGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.020, 0.14, 6), oakMat);
+    dirkGrip.rotation.x = Math.PI / 2;
+    const dirkBlade = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.38, 4), this.swordBladeMat);
+    dirkBlade.rotation.x = -Math.PI / 2;
+    dirkBlade.position.set(0, 0, -0.24);
+    this.dirkGroup.add(dirkGrip, dirkBlade);
+    this.rightArm.add(this.dirkGroup);
+
+    // Single-Shot All-Metal Highland Flintlock Pistol
+    this.flintlockGroup = new THREE.Group();
+    this.flintlockGroup.position.set(0, -0.46, -0.06);
+    const pStock = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.055, 0.24), ironMat);
+    pStock.position.set(0, -0.02, -0.08);
+    const pBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.34, 6), ironMat);
+    pBarrel.rotation.x = Math.PI / 2;
+    pBarrel.position.set(0, 0.015, -0.22);
+    const pBrass = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 6), brassMat);
+    pBrass.position.set(0, -0.05, 0.04);
+    this.flintlockGroup.add(pStock, pBarrel, pBrass);
+    this.rightArm.add(this.flintlockGroup);
+
     this.callumBody.add(this.leftArm, this.rightArm);
-
-    const scabbard = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.022, 1.06, 6), leatherMat);
-    scabbard.position.set(-0.29, 0.92, 0.14);
-    scabbard.rotation.x = 0.68;
-    scabbard.rotation.z = 0.16;
-    this.callumBody.add(scabbard);
-
-    const basketHilt = new THREE.Mesh(new THREE.SphereGeometry(0.078, 8, 8), steelMat);
-    basketHilt.position.set(-0.24, 1.24, -0.2);
-    this.callumBody.add(basketHilt);
-
     this.scene.add(this.callum);
   }
 
@@ -1206,18 +1106,12 @@ export class WorldRenderer {
     const segs = highDetail ? 48 : 16;
     const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
     geo.rotateX(-Math.PI / 2);
-
     const pos = geo.attributes.position;
-    const originX = cx * CHUNK_SIZE;
-    const originZ = cz * CHUNK_SIZE;
-
+    const originX = cx * CHUNK_SIZE, originZ = cz * CHUNK_SIZE;
     for (let i = 0; i < pos.count; i++) {
-      const wx = pos.getX(i) + originX;
-      const wz = pos.getZ(i) + originZ;
-      pos.setY(i, heightAt(wx, wz));
+      pos.setY(i, heightAt(pos.getX(i) + originX, pos.getZ(i) + originZ));
     }
     geo.computeVertexNormals();
-
     const mesh = new THREE.Mesh(geo, this.terrainMat);
     mesh.position.set(originX, 0, originZ);
     mesh.receiveShadow = true;
@@ -1226,32 +1120,24 @@ export class WorldRenderer {
   }
 
   _updateTerrainChunks(px, pz) {
-    const pcx = Math.round(px / CHUNK_SIZE);
-    const pcz = Math.round(pz / CHUNK_SIZE);
+    const pcx = Math.round(px / CHUNK_SIZE), pcz = Math.round(pz / CHUNK_SIZE);
     const needed = new Set();
-
     for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
       for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
-        const cx = pcx + dx, cz = pcz + dz;
-        const key = `${cx},${cz}`;
+        const cx = pcx + dx, cz = pcz + dz, key = `${cx},${cz}`;
         needed.add(key);
-
         const wantHigh = Math.abs(dx) <= 1 && Math.abs(dz) <= 1;
         const existing = this.chunks.get(key);
-        if (!existing) {
-          this.chunks.set(key, this._buildChunk(cx, cz, wantHigh));
-        } else if (existing.highDetail !== wantHigh) {
-          this.scene.remove(existing.mesh);
-          existing.mesh.geometry.dispose();
+        if (!existing) this.chunks.set(key, this._buildChunk(cx, cz, wantHigh));
+        else if (existing.highDetail !== wantHigh) {
+          this.scene.remove(existing.mesh); existing.mesh.geometry.dispose();
           this.chunks.set(key, this._buildChunk(cx, cz, wantHigh));
         }
       }
     }
-
     for (const [key, entry] of this.chunks.entries()) {
       if (!needed.has(key)) {
-        this.scene.remove(entry.mesh);
-        entry.mesh.geometry.dispose();
+        this.scene.remove(entry.mesh); entry.mesh.geometry.dispose();
         this.chunks.delete(key);
       }
     }
@@ -1272,9 +1158,7 @@ export class WorldRenderer {
     const rain = this.sharedUniforms.uRain.value;
 
     const sunAngle = ((worldState.timeOfDay - 6) / 24) * Math.PI * 2;
-    const elev = Math.sin(sunAngle);
-    const horiz = Math.cos(sunAngle);
-
+    const elev = Math.sin(sunAngle), horiz = Math.cos(sunAngle);
     this.sharedUniforms.uSunDir.value.set(horiz * 0.85, Math.max(elev, -0.25), -0.40).normalize();
     const dayFactor = clamp((elev + 0.08) / 0.42, 0, 1);
     const goldenFactor = clamp(1 - Math.abs(elev - 0.16) / 0.32, 0, 1);
@@ -1282,10 +1166,8 @@ export class WorldRenderer {
     this.sharedUniforms.uDayFactor.value = dayFactor;
     this.skyUniforms.uGoldenFactor.value = goldenFactor;
 
-    const snapX = Math.round(px / 2) * 2;
-    const snapZ = Math.round(pz / 2) * 2;
+    const snapX = Math.round(px / 2) * 2, snapZ = Math.round(pz / 2) * 2;
     const activeDir = elev > 0.02 ? this.sharedUniforms.uSunDir.value : new THREE.Vector3(-0.4, 0.55, 0.5).normalize();
-
     this.sunLight.position.set(snapX + activeDir.x * 160, activeDir.y * 160, snapZ + activeDir.z * 160);
     this.sunLight.target.position.set(snapX, 0, snapZ);
     this.sunLight.target.updateMatrixWorld();
@@ -1321,18 +1203,12 @@ export class WorldRenderer {
       this.rainLines.material.opacity = rain * 0.38;
       const wind = this.onixField.sampleWind(px, pz);
       const pos = this.rainPositions, off = this.rainOffsets;
-      const count = off.length / 3;
       const slantX = wind.x * 0.28, slantZ = wind.z * 0.28;
-
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < off.length / 3; i++) {
         const oi = i * 3;
         off[oi + 1] -= 24.0 * dt;
         if (off[oi + 1] < -2) off[oi + 1] += 22;
-
-        const rx = this.camera.position.x + off[oi];
-        const ry = this.camera.position.y - 6 + off[oi + 1];
-        const rz = this.camera.position.z + off[oi + 2];
-
+        const rx = this.camera.position.x + off[oi], ry = this.camera.position.y - 6 + off[oi + 1], rz = this.camera.position.z + off[oi + 2];
         const pi = i * 6;
         pos[pi] = rx; pos[pi + 1] = ry; pos[pi + 2] = rz;
         pos[pi + 3] = rx + slantX; pos[pi + 4] = ry - 0.85; pos[pi + 5] = rz + slantZ;
@@ -1345,20 +1221,115 @@ export class WorldRenderer {
     for (const p of this.smokeParticles) {
       p.age += dt * p.speed;
       if (p.age > 1) p.age -= 1;
-
       const wind = this.onixField.sampleWind(p.src.x, p.src.z);
-      const rise = p.age * 9.5;
-      const driftX = p.age * (2.6 + wind.x * 2.8) + Math.sin(this.elapsed * 0.9 + p.seed) * 0.4 * p.age;
-      const driftZ = p.age * (1.2 + wind.z * 2.8) + Math.cos(this.elapsed * 0.7 + p.seed) * 0.35 * p.age;
-
-      p.sprite.position.set(p.src.x + driftX, p.src.y + rise, p.src.z + driftZ);
+      p.sprite.position.set(
+        p.src.x + p.age * (2.6 + wind.x * 2.8) + Math.sin(this.elapsed * 0.9 + p.seed) * 0.4 * p.age,
+        p.src.y + p.age * 9.5,
+        p.src.z + p.age * (1.2 + wind.z * 2.8) + Math.cos(this.elapsed * 0.7 + p.seed) * 0.35 * p.age
+      );
       const scale = lerp(0.9, 4.8, p.age);
       p.sprite.scale.set(scale, scale, 1);
       p.sprite.material.opacity = Math.sin(p.age * Math.PI) * 0.36;
     }
   }
 
-  update(dt, player, mount, worldState) {
+  _updateCallumWeaponsAndPose(player, mount, combat) {
+    // Toggle visible personal weapons & physical targe position (Left Arm <-> Back Spine Armor)
+    this.swordGroup.visible = combat.weapon === 'sword';
+    this.hipSwordHilt.visible = combat.weapon !== 'sword';
+    this.dirkGroup.visible = combat.weapon === 'dirk';
+    this.flintlockGroup.visible = combat.weapon === 'flintlock';
+    this.bowGroup.visible = combat.weapon === 'bow';
+    this.bowArrow.visible = combat.weapon === 'bow' && combat.arrowCount > 0;
+    this.armTarge.visible = combat.targeOnArm;
+    this.backTarge.visible = !combat.targeOnArm;
+
+    // Persistent blood staining on Father's Broadsword & Dirk steel
+    this.swordBladeMat.color.setHex(0xc6d0d8).lerp(this.tmpColor.setHex(0x520505), combat.bladeBlood * 0.88);
+
+    // Base locomotion pose (mounted vs on foot)
+    if (mount.mounted) {
+      const horseBob = this.bramble.bodyGroup.position.y;
+      const leanFwd = clamp(mount.speed / 14.0, 0, 1) * 0.24;
+      this.callum.position.set(mount.x, mount.y + 0.86 + horseBob, mount.z);
+      this.callum.rotation.set(mount.pitch * 0.55, mount.yaw, -mount.roll * 0.55);
+      this.callumBody.position.y = 0;
+      this.callumBody.rotation.set(-leanFwd, 0, 0);
+      this.leftLeg.rotation.set(0.32, 0, 0.34);
+      this.rightLeg.rotation.set(0.32, 0, -0.34);
+      const reinBob = Math.sin(mount.stridePhase) * 0.08 * clamp(mount.speed / 10, 0, 1);
+      this.leftArm.rotation.set(0.72 + reinBob, 0, -0.14);
+      this.rightArm.rotation.set(0.72 + reinBob, 0, 0.14);
+    } else {
+      this.callum.position.set(player.x, player.y, player.z);
+      this.callum.rotation.set(0, player.facingYaw, 0);
+      const strideAmp = clamp(player.speed / 5.0, 0, 1);
+      const swing = Math.sin(player.stridePhase) * 0.55 * strideAmp;
+      this.leftLeg.rotation.set(swing, 0, 0);
+      this.rightLeg.rotation.set(-swing, 0, 0);
+      this.leftArm.rotation.set(-swing * 0.75, 0, 0);
+      this.rightArm.rotation.set(swing * 0.75, 0, 0);
+      this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
+      this.callumBody.rotation.set(player.crouchBlend * 0.28 + strideAmp * 0.06, 0, 0);
+    }
+
+    // Combat upper-body pose overlays (swings, heavy cleave, parry guard, shield bash, bow draw, flintlock)
+    if (combat.attackState !== 'NONE') {
+      const p = clamp(combat.attackTimer / combat.attackDuration, 0, 1);
+      if (combat.attackState === 'BASH') {
+        const thrust = Math.sin(p * Math.PI);
+        this.leftArm.rotation.set(1.45, -0.35 + thrust * 0.5, 0.2);
+        this.callumBody.rotation.y = -thrust * 0.45;
+      } else if (combat.attackKind === 'heavy_cleave') {
+        const arc = p < 0.34 ? lerp(0.8, 2.75, p / 0.34) : lerp(2.75, 0.25, (p - 0.34) / 0.66);
+        this.rightArm.rotation.set(arc, 0.15, -0.22);
+        this.callumBody.rotation.y = p < 0.34 ? -0.35 : 0.42;
+      } else if (combat.attackKind === 'fast_left') {
+        const sweep = lerp(-1.1, 1.3, p);
+        this.rightArm.rotation.set(1.35, sweep, -0.45);
+        this.callumBody.rotation.y = sweep * 0.35;
+      } else if (combat.attackKind === 'fast_right') {
+        const sweep = lerp(1.2, -1.1, p);
+        this.rightArm.rotation.set(1.35, sweep, 0.45);
+        this.callumBody.rotation.y = sweep * 0.35;
+      } else {
+        // Thrust / Dirk Slash / Stealth Takedown
+        const lunge = Math.sin(p * Math.PI);
+        this.rightArm.rotation.set(1.42 + lunge * 0.35, -0.15, 0);
+        this.callumBody.rotation.x += lunge * 0.22;
+      }
+    } else if (combat.guarding) {
+      if (combat.targeOnArm) {
+        this.leftArm.rotation.set(1.35, -0.58, 0.22);
+        this.rightArm.rotation.set(1.05, 0.28, -0.22);
+      } else {
+        this.rightArm.rotation.set(1.32, 0.68, -0.52);
+        this.leftArm.rotation.set(0.95, -0.32, 0.22);
+      }
+    } else if (combat.weapon === 'bow' && combat.bowDrawing) {
+      this.leftArm.rotation.set(1.52, -0.12, 0);
+      this.rightArm.rotation.set(1.46, 0.38 + combat.bowDraw * 0.45, -0.15);
+      this.bowArrow.position.z = -0.25 + combat.bowDraw * 0.22;
+      this.callumBody.rotation.y = -0.55;
+    } else if (combat.weapon === 'flintlock') {
+      if (combat.flintlockReloadTimer > 0) {
+        const ram = Math.sin(this.elapsed * 8.0) * 0.16;
+        this.rightArm.rotation.set(0.95 + ram, 0.32, 0);
+        this.leftArm.rotation.set(0.98, -0.32, 0);
+      } else {
+        this.rightArm.rotation.set(1.48, 0.08, 0);
+      }
+    } else if (combat.wipeTimer > 0) {
+      const w = Math.sin(this.elapsed * 14.0) * 0.35;
+      this.rightArm.rotation.set(1.15, 0.5 + w, -0.2);
+      this.leftArm.rotation.set(1.15, -0.4 - w, 0.2);
+    } else if (combat.weapon === 'sword' && !mount.mounted) {
+      // Relaxed ready carry for Father's Broadsword
+      this.rightArm.rotation.x += 0.35;
+    }
+  }
+
+  update(dt, player, mount, combat, redcoats, worldState) {
     this.elapsed += dt;
     this.sharedUniforms.uTime.value = this.elapsed;
 
@@ -1370,64 +1341,35 @@ export class WorldRenderer {
     this.waterMesh.position.x = Math.round(player.x / 50) * 50;
     this.waterMesh.position.z = Math.round(player.z / 50) * 50;
 
-    // Update Bramble (Highland Garron)
     this.bramble.update(mount, this.elapsed);
+    this._updateCallumWeaponsAndPose(player, mount, combat);
+    this.redcoatRenderer.sync(redcoats, this.elapsed);
+    this.combatFX.update(dt, combat, this.onixField);
+    this.post?.setDamageFlash(combat.damageFlash);
 
-    // Update Callum (either walking on foot or seated seamlessly astride Bramble's saddle)
-    if (mount.mounted) {
-      const horseBob = this.bramble.bodyGroup.position.y;
-      const leanFwd = clamp(mount.speed / 14.0, 0, 1) * 0.24;
-
-      this.callum.position.set(mount.x, mount.y + 0.86 + horseBob, mount.z);
-      this.callum.rotation.y = mount.yaw;
-      this.callum.rotation.x = mount.pitch * 0.55;
-      this.callum.rotation.z = -mount.roll * 0.55;
-
-      this.callumBody.position.y = 0;
-      this.callumBody.rotation.x = -leanFwd;
-
-      // Legs astride Bramble's flanks, forearms forward holding the leather reins
-      this.leftLeg.rotation.set(0.32, 0, 0.34);
-      this.rightLeg.rotation.set(0.32, 0, -0.34);
-      const reinBob = Math.sin(mount.stridePhase) * 0.08 * clamp(mount.speed / 10, 0, 1);
-      this.leftArm.rotation.set(0.72 + reinBob, 0, -0.14);
-      this.rightArm.rotation.set(0.72 + reinBob, 0, 0.14);
-    } else {
-      this.callum.position.set(player.x, player.y, player.z);
-      this.callum.rotation.set(0, player.facingYaw, 0);
-
-      const strideAmp = clamp(player.speed / 5.0, 0, 1);
-      const swing = Math.sin(player.stridePhase) * 0.55 * strideAmp;
-      this.leftLeg.rotation.set(swing, 0, 0);
-      this.rightLeg.rotation.set(-swing, 0, 0);
-      this.leftArm.rotation.set(-swing * 0.75, 0, 0);
-      this.rightArm.rotation.set(swing * 0.75, 0, 0);
-
-      this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
-      this.callumBody.rotation.x = player.crouchBlend * 0.28 + strideAmp * 0.06;
-    }
-
-    // Dynamic RDR2 camera: pulls smoothly back on horseback & widens FOV slightly at full gallop
+    // Dynamic camera: pulls back at gallop, tightens smoothly over shoulder when drawing bow or aiming flintlock
+    const isAiming = (combat.weapon === 'bow' && combat.bowDrawing) || (combat.weapon === 'flintlock' && combat.flintlockReloadTimer <= 0);
     const speedNorm = mount.mounted ? clamp(mount.speed / 14.0, 0, 1) : 0;
-    const targetFov = mount.mounted ? lerp(56, 63, speedNorm) : 54;
+    const targetFov = isAiming ? 44 : mount.mounted ? lerp(56, 63, speedNorm) : 54;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = lerp(this.camera.fov, targetFov, 1 - Math.exp(-5 * dt));
+      this.camera.fov = lerp(this.camera.fov, targetFov, 1 - Math.exp(-7 * dt));
       this.camera.updateProjectionMatrix();
     }
 
-    const shoulderRight = mount.mounted ? 0.65 : 0.55;
-    const activeDist = mount.mounted ? player.camDistance + 1.55 + speedNorm * 0.9 : player.camDistance;
+    const shoulderRight = isAiming ? 0.68 : mount.mounted ? 0.65 : 0.55;
+    const activeDist = isAiming
+      ? (mount.mounted ? 4.4 : 3.2)
+      : mount.mounted
+        ? player.camDistance + 1.55 + speedNorm * 0.9
+        : player.camDistance;
     const pivotY = mount.mounted ? mount.y + 2.25 : player.y + lerp(1.62, 1.18, player.crouchBlend);
 
-    const cosP = Math.cos(player.camPitch);
-    const sinP = Math.sin(player.camPitch);
-    const sinY = Math.sin(player.camYaw);
-    const cosY = Math.cos(player.camYaw);
+    const cosP = Math.cos(player.camPitch), sinP = Math.sin(player.camPitch);
+    const sinY = Math.sin(player.camYaw), cosY = Math.cos(player.camYaw);
 
     const desiredX = player.x + sinY * cosP * activeDist + cosY * shoulderRight;
     const desiredZ = player.z + cosY * cosP * activeDist - sinY * shoulderRight;
     let desiredY = pivotY + sinP * activeDist;
-
     const camTerrainY = heightAt(desiredX, desiredZ) + 0.65;
     if (desiredY < camTerrainY) desiredY = camTerrainY;
 
@@ -1440,17 +1382,20 @@ export class WorldRenderer {
       this.camLook.lerp(new THREE.Vector3(player.x + cosY * 0.35, pivotY, player.z - sinY * 0.35), camAlpha);
     }
 
-    this.camera.position.copy(this.camPos);
+    // Apply tactical impact camera shake (parries, flintlock blasts, cleaves) without drifting camPos
+    const shake = combat.screenShake * 0.16;
+    this.camera.position.set(
+      this.camPos.x + (Math.random() - 0.5) * shake,
+      this.camPos.y + (Math.random() - 0.5) * shake,
+      this.camPos.z + (Math.random() - 0.5) * shake
+    );
     this.camera.lookAt(this.camLook);
     this.skyDome.position.copy(this.camera.position);
   }
 
   render() {
-    if (this.post) {
-      this.post.render(this.scene, this.camera);
-    } else {
-      this.renderer.render(this.scene, this.camera);
-    }
+    if (this.post) this.post.render(this.scene, this.camera);
+    else this.renderer.render(this.scene, this.camera);
   }
 
   resize() {
