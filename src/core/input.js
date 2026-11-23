@@ -9,16 +9,28 @@ export class InputManager {
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.wheelDelta = 0;
+
+    this.attackDown = false;
+    this.guardDown = false;
     this.crouchToggled = false;
+
     this.pauseQueued = false;
     this.interactQueued = false;
+    this.interactHoldQueued = false;
+    this.eDownTime = 0;
+    this.eHoldFired = false;
+
     this.jumpQueued = false;
     this.weatherQueued = false;
-    this.oilToggleQueued = false;
     this.mountQueued = false;
     this.whistleQueued = false;
     this.tendQueued = false;
     this.muteQueued = false;
+    this.targeQueued = false;
+    this.bashQueued = false;
+    this.reloadQueued = false;
+    this.wipeQueued = false;
+    this.weaponSelectQueued = null;
 
     this.touchMoveX = 0;
     this.touchMoveZ = 0;
@@ -26,30 +38,28 @@ export class InputManager {
     this.touchLookDeltaX = 0;
     this.touchLookDeltaY = 0;
 
-    this.prevPadPause = false;
-    this.prevPadCrouch = false;
-    this.prevPadJump = false;
-    this.prevPadInteract = false;
-    this.prevPadWeather = false;
-    this.prevPadOil = false;
-    this.prevPadWhistle = false;
-    this.prevPadTend = false;
-    this.prevPadMute = false;
-
+    this.prevPad = {};
     this._bindKeyboardMouse();
     this._bindTouch();
   }
 
   clearTransient() {
+    this.attackDown = false;
+    this.guardDown = false;
     this.pauseQueued = false;
     this.interactQueued = false;
+    this.interactHoldQueued = false;
     this.jumpQueued = false;
     this.weatherQueued = false;
-    this.oilToggleQueued = false;
     this.mountQueued = false;
     this.whistleQueued = false;
     this.tendQueued = false;
     this.muteQueued = false;
+    this.targeQueued = false;
+    this.bashQueued = false;
+    this.reloadQueued = false;
+    this.wipeQueued = false;
+    this.weaponSelectQueued = null;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.wheelDelta = 0;
@@ -57,6 +67,12 @@ export class InputManager {
 
   _bindKeyboardMouse() {
     window.addEventListener('keydown', (e) => {
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        if (!this.keys.has('Tab')) this.weaponSelectQueued = 'holster';
+        this.keys.add('Tab');
+        return;
+      }
       if (e.code === 'Escape') {
         this.pauseQueued = true;
         return;
@@ -64,43 +80,78 @@ export class InputManager {
       if (!this.keys.has(e.code)) {
         if (e.code === 'KeyC' || e.code === 'ControlLeft') this.crouchToggled = !this.crouchToggled;
         if (e.code === 'Space') this.jumpQueued = true;
-        if (e.code === 'KeyE') this.interactQueued = true;
+        if (e.code === 'KeyE') {
+          this.eDownTime = 0;
+          this.eHoldFired = false;
+        }
         if (e.code === 'KeyF') this.mountQueued = true;
         if (e.code === 'KeyH') this.whistleQueued = true;
         if (e.code === 'KeyG') this.tendQueued = true;
         if (e.code === 'KeyM') this.muteQueued = true;
         if (e.code === 'KeyV') this.weatherQueued = true;
-        if (e.code === 'KeyP') this.oilToggleQueued = true;
+        if (e.code === 'KeyQ') this.targeQueued = true;
+        if (e.code === 'KeyX') this.bashQueued = true;
+        if (e.code === 'KeyR') this.reloadQueued = true;
+        if (e.code === 'KeyZ') this.wipeQueued = true;
+        if (e.code === 'Digit1') this.weaponSelectQueued = 'sword';
+        if (e.code === 'Digit2') this.weaponSelectQueued = 'flintlock';
+        if (e.code === 'Digit3') this.weaponSelectQueued = 'dirk';
+        if (e.code === 'Digit4') this.weaponSelectQueued = 'bow';
       }
       this.keys.add(e.code);
     });
 
     window.addEventListener('keyup', (e) => {
+      if (e.code === 'KeyE' && this.keys.has('KeyE')) {
+        if (!this.eHoldFired) this.interactQueued = true;
+        this.eDownTime = 0;
+        this.eHoldFired = false;
+      }
       this.keys.delete(e.code);
     });
 
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.mouseDragging = false;
+      this.attackDown = false;
+      this.guardDown = false;
     });
 
     document.addEventListener('pointerlockchange', () => {
       const wasLocked = this.pointerLocked;
       this.pointerLocked = document.pointerLockElement === this.canvas;
       if (wasLocked && !this.pointerLocked) {
+        this.attackDown = false;
+        this.guardDown = false;
         this.pauseQueued = true;
       }
     });
 
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
-        this.mouseDragging = true;
-        if (!this.pointerLocked) this.requestPointerLock();
+        if (!this.pointerLocked) {
+          this.mouseDragging = true;
+          this.requestPointerLock();
+        } else {
+          this.attackDown = true;
+        }
+      } else if (e.button === 2) {
+        this.guardDown = true;
+      } else if (e.button === 1) {
+        e.preventDefault();
+        this.bashQueued = true;
       }
     });
 
-    window.addEventListener('mouseup', () => {
-      this.mouseDragging = false;
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) {
+        this.mouseDragging = false;
+        this.attackDown = false;
+      } else if (e.button === 2) {
+        this.guardDown = false;
+      }
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -180,21 +231,11 @@ export class InputManager {
     this.canvas.addEventListener('touchend', endLook, { passive: true });
     this.canvas.addEventListener('touchcancel', endLook, { passive: true });
 
-    document.getElementById('touch-sprint')?.addEventListener('click', () => {
-      this.touchSprint = !this.touchSprint;
-    });
-    document.getElementById('touch-crouch')?.addEventListener('click', () => {
-      this.crouchToggled = !this.crouchToggled;
-    });
-    document.getElementById('touch-jump')?.addEventListener('click', () => {
-      this.jumpQueued = true;
-    });
-    document.getElementById('touch-mount')?.addEventListener('click', () => {
-      this.mountQueued = true;
-    });
-    document.getElementById('touch-whistle')?.addEventListener('click', () => {
-      this.whistleQueued = true;
-    });
+    document.getElementById('touch-sprint')?.addEventListener('click', () => { this.touchSprint = !this.touchSprint; });
+    document.getElementById('touch-crouch')?.addEventListener('click', () => { this.crouchToggled = !this.crouchToggled; });
+    document.getElementById('touch-jump')?.addEventListener('click', () => { this.jumpQueued = true; });
+    document.getElementById('touch-mount')?.addEventListener('click', () => { this.mountQueued = true; });
+    document.getElementById('touch-whistle')?.addEventListener('click', () => { this.whistleQueued = true; });
   }
 
   _updatePad(touch, pad, knob) {
@@ -218,15 +259,29 @@ export class InputManager {
     }
   }
 
+  _padEdge(pad, idx) {
+    const pressed = Boolean(pad.buttons[idx]?.pressed);
+    const rising = pressed && !this.prevPad[idx];
+    this.prevPad[idx] = pressed;
+    return rising;
+  }
+
   poll(dt) {
+    // Detect Hold-E (> 0.38s) for grabbing & dragging downed Redcoats into heather
+    if (this.keys.has('KeyE') && !this.eHoldFired) {
+      this.eDownTime += dt;
+      if (this.eDownTime >= 0.38) {
+        this.eHoldFired = true;
+        this.interactHoldQueued = true;
+      }
+    }
+
     let moveX = 0;
     let moveZ = 0;
-
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) moveX -= 1;
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) moveX += 1;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) moveZ -= 1;
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) moveZ += 1;
-
     moveX += this.touchMoveX;
     moveZ += this.touchMoveZ;
 
@@ -241,6 +296,9 @@ export class InputManager {
     this.wheelDelta = 0;
 
     let sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touchSprint;
+    let attackDown = this.attackDown;
+    let guardDown = this.guardDown;
+
     let timeDelta = 0;
     if (this.keys.has('BracketLeft')) timeDelta -= 2.5 * dt;
     if (this.keys.has('BracketRight')) timeDelta += 2.5 * dt;
@@ -256,7 +314,6 @@ export class InputManager {
       const ly = deadzone(pad.axes[1] || 0);
       const rx = deadzone(pad.axes[2] || 0);
       const ry = deadzone(pad.axes[3] || 0);
-
       if (Math.abs(lx) > 0 || Math.abs(ly) > 0) {
         moveX = lx;
         moveZ = ly;
@@ -265,47 +322,23 @@ export class InputManager {
       lookY += ry * 1.8 * dt;
 
       if (pad.buttons[0]?.pressed || pad.buttons[10]?.pressed) sprint = true;
+      if (pad.buttons[5]?.pressed) attackDown = true; // RB = Attack / Bow Draw
+      if (pad.buttons[4]?.pressed) guardDown = true;  // LB = Guard / Parry
 
-      const crouchBtn = Boolean(pad.buttons[1]?.pressed || pad.buttons[11]?.pressed);
-      if (crouchBtn && !this.prevPadCrouch) this.crouchToggled = !this.crouchToggled;
-      this.prevPadCrouch = crouchBtn;
-
-      const jumpBtn = Boolean(pad.buttons[3]?.pressed);
-      if (jumpBtn && !this.prevPadJump) this.jumpQueued = true;
-      this.prevPadJump = jumpBtn;
-
-      // X / Square (2) = Interact & Mount/Dismount
-      const interactBtn = Boolean(pad.buttons[2]?.pressed);
-      if (interactBtn && !this.prevPadInteract) {
+      if (this._padEdge(pad, 1) || this._padEdge(pad, 11)) this.crouchToggled = !this.crouchToggled;
+      if (this._padEdge(pad, 3)) this.jumpQueued = true;
+      if (this._padEdge(pad, 2)) {
         this.interactQueued = true;
         this.mountQueued = true;
+        this.reloadQueued = true;
       }
-      this.prevPadInteract = interactBtn;
-
-      // D-Pad: Up(12)=Weather, Down(13)=Mute, Left(14)=Whistle, Right(15)=Tend/Brush
-      const weatherBtn = Boolean(pad.buttons[12]?.pressed);
-      if (weatherBtn && !this.prevPadWeather) this.weatherQueued = true;
-      this.prevPadWeather = weatherBtn;
-
-      const muteBtn = Boolean(pad.buttons[13]?.pressed);
-      if (muteBtn && !this.prevPadMute) this.muteQueued = true;
-      this.prevPadMute = muteBtn;
-
-      const whistleBtn = Boolean(pad.buttons[14]?.pressed);
-      if (whistleBtn && !this.prevPadWhistle) this.whistleQueued = true;
-      this.prevPadWhistle = whistleBtn;
-
-      const tendBtn = Boolean(pad.buttons[15]?.pressed);
-      if (tendBtn && !this.prevPadTend) this.tendQueued = true;
-      this.prevPadTend = tendBtn;
-
-      const oilBtn = Boolean(pad.buttons[8]?.pressed);
-      if (oilBtn && !this.prevPadOil) this.oilToggleQueued = true;
-      this.prevPadOil = oilBtn;
-
-      const pauseBtn = Boolean(pad.buttons[9]?.pressed);
-      if (pauseBtn && !this.prevPadPause) this.pauseQueued = true;
-      this.prevPadPause = pauseBtn;
+      if (this._padEdge(pad, 6)) this.targeQueued = true; // LT = Targe Arm/Back
+      if (this._padEdge(pad, 7)) this.bashQueued = true;  // RT = Shield Bash
+      if (this._padEdge(pad, 12)) this.weatherQueued = true;
+      if (this._padEdge(pad, 13)) this.weaponSelectQueued = 'cycle';
+      if (this._padEdge(pad, 14)) this.whistleQueued = true;
+      if (this._padEdge(pad, 15)) this.tendQueued = true;
+      if (this._padEdge(pad, 9)) this.pauseQueued = true;
     }
 
     const len = Math.hypot(moveX, moveZ);
@@ -313,10 +346,7 @@ export class InputManager {
       moveX /= len;
       moveZ /= len;
     }
-
-    if (sprint && this.crouchToggled && len > 0.2) {
-      this.crouchToggled = false;
-    }
+    if (sprint && this.crouchToggled && len > 0.2) this.crouchToggled = false;
 
     const out = {
       moveX,
@@ -326,28 +356,40 @@ export class InputManager {
       zoomDelta,
       sprint,
       crouch: this.crouchToggled,
+      attackDown,
+      guardDown,
       jump: this.jumpQueued,
       interact: this.interactQueued,
+      interactHold: this.interactHoldQueued,
       mountToggle: this.mountQueued,
       whistle: this.whistleQueued,
       tend: this.tendQueued,
       muteToggle: this.muteQueued,
       weatherToggle: this.weatherQueued,
-      oilToggle: this.oilToggleQueued,
+      targeToggle: this.targeQueued,
+      bash: this.bashQueued,
+      reload: this.reloadQueued,
+      wipeBlade: this.wipeQueued,
+      weaponSelect: this.weaponSelectQueued,
       pausePressed: this.pauseQueued,
       timeDelta,
       gamepadConnected
     };
 
     this.pauseQueued = false;
-    this.jumpQueued = false;
     this.interactQueued = false;
+    this.interactHoldQueued = false;
+    this.jumpQueued = false;
     this.mountQueued = false;
     this.whistleQueued = false;
     this.tendQueued = false;
     this.muteQueued = false;
     this.weatherQueued = false;
-    this.oilToggleQueued = false;
+    this.targeQueued = false;
+    this.bashQueued = false;
+    this.reloadQueued = false;
+    this.wipeQueued = false;
+    this.weaponSelectQueued = null;
 
     return out;
   }
