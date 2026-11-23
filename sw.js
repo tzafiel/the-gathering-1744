@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gathering-1744-v7';
+const CACHE_NAME = 'gathering-1744-v8';
 
 const APP_SHELL = [
   './',
@@ -12,6 +12,7 @@ const APP_SHELL = [
   './src/world/worldState.js',
   './src/sim/player.js',
   './src/sim/onixField.js',
+  './src/render/painterlyPost.js',
   './src/render/onixShaders.js',
   './src/render/worldRenderer.js'
 ];
