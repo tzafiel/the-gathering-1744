@@ -8,6 +8,7 @@ import {
   importWorldStateJSON
 } from './world/worldState.js';
 import { getRegionName, heightAt, LANDMARKS, WATER_LEVEL } from './world/terrain.js';
+import { WorldColliders } from './world/colliders.js';
 import { PlayerController } from './sim/player.js';
 import { MountController } from './sim/mount.js';
 import { CombatSystem } from './sim/combat.js';
@@ -56,10 +57,11 @@ function boot() {
   let mount = new MountController(worldState);
   let combat = new CombatSystem(worldState);
   let redcoats = new RedcoatManager(worldState.worldSeed || 1744);
+  const colliders = new WorldColliders();
   const onixField = new OnixField(64, worldState.worldSeed || 1744);
   const input = new InputManager(canvas);
   const audio = new HighlandAudio();
-  const renderer = new WorldRenderer(canvas, onixField);
+  const renderer = new WorldRenderer(canvas, onixField, colliders);
 
   try {
     renderer.init();
@@ -150,7 +152,6 @@ function boot() {
   window.addEventListener('resize', () => renderer.resize());
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
-  // Tier 1 Mortality: "Left for Dead" — world moves forward 3 days, permanent scar, wake by Baile MacRae hearth
   function handleLeftForDead() {
     worldState.dayCount += 3;
     worldState.timeOfDay = 7.2;
@@ -195,7 +196,7 @@ function boot() {
   }
 
   function formatWeaponLabel() {
-    const w = combat.weapon;
+    const w = combat.pendingWeapon || combat.weapon;
     if (w === 'sword') return `BROADSWORD${combat.bladeBlood > 0.35 ? ' (BLOODIED · Z)' : ''}`;
     if (w === 'dirk') return 'BELT DIRK · STEALTH';
     if (w === 'flintlock') {
@@ -231,7 +232,7 @@ function boot() {
     elapsed += frameDt;
 
     if (frameInput.weaponSelect === 'cycle') {
-      const idx = WEAPON_CYCLE.indexOf(combat.weapon);
+      const idx = WEAPON_CYCLE.indexOf(combat.pendingWeapon || combat.weapon);
       frameInput.weaponSelect = WEAPON_CYCLE[(idx + 1) % WEAPON_CYCLE.length];
     }
 
@@ -260,7 +261,8 @@ function boot() {
         mount.aiTimer = 3.5;
         const leftX = mount.x - Math.cos(mount.yaw) * 1.45;
         const leftZ = mount.z + Math.sin(mount.yaw) * 1.45;
-        player.x = leftX; player.z = leftZ; player.y = heightAt(leftX, leftZ);
+        const safe = colliders.resolveCircle(leftX, leftZ, 0.44, mount.y);
+        player.x = safe.x; player.z = safe.z; player.y = heightAt(safe.x, safe.z);
         player.vx = player.vy = player.vz = 0;
         player.grounded = true;
         audio.playStep(player.surface.id, 0.7, false, 0);
@@ -286,14 +288,13 @@ function boot() {
     if (worldState.timeOfDay >= 24) { worldState.timeOfDay -= 24; worldState.dayCount += 1; }
     else if (worldState.timeOfDay < 0) { worldState.timeOfDay += 24; }
 
-    // 60Hz deterministic simulation with Hit-Stop freeze frames for tactile steel impact
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
-      const hitStopped = combat.update(FIXED_DT, frameInput, player, mount, redcoats, onixField, worldState, rainIntensity);
+      const hitStopped = combat.update(FIXED_DT, frameInput, player, mount, redcoats, onixField, worldState, rainIntensity, colliders);
       if (!hitStopped) {
-        if (!mount.mounted) player.update(FIXED_DT, frameInput);
-        mount.update(FIXED_DT, frameInput, player, rainIntensity);
-        redcoats.update(FIXED_DT, player, mount, combat, rainIntensity);
+        if (!mount.mounted) player.update(FIXED_DT, frameInput, colliders);
+        mount.update(FIXED_DT, frameInput, player, rainIntensity, colliders);
+        redcoats.update(FIXED_DT, player, mount, combat, rainIntensity, colliders);
 
         if (rainIntensity > 0) player.wetness = clamp(player.wetness + 0.065 * FIXED_DT, 0, 1);
         if (mount.mounted && mount.speed > 10.5) redcoats.notifyNoise(mount.x, mount.z, 22, false);
@@ -307,7 +308,6 @@ function boot() {
       accumulator -= FIXED_DT;
     }
 
-    // Dispatch Audio & Combat Visual FX events
     audio.updateAmbient(frameDt, player.x, player.y, player.z, onixField, rainIntensity, elapsed);
     for (const ev of player.consumeEvents()) {
       if (ev.type === 'step') audio.playStep(ev.surfaceId, ev.intensity, false, 0);
@@ -322,7 +322,13 @@ function boot() {
     }
     for (const ev of combat.consumeEvents()) {
       if (ev.type === 'notice') showNotice(ev.text, ev.duration || 2.0);
+      if (ev.type === 'equip') audio.playEquip(ev.weapon);
       if (ev.type === 'swing') audio.playSwing(ev.kind, ev.heavy);
+      if (ev.type === 'world_impact') {
+        const d = Math.hypot(ev.x - player.x, ev.z - player.z);
+        audio.playWorldImpact(ev.material, ev.kind, d);
+        renderer.combatFX.spawnSparks(ev.x, ev.y, ev.z, ev.kind === 'musket_ball' ? 12 : 6, ev.material === 'wood');
+      }
       if (ev.type === 'parry') {
         audio.playParry();
         renderer.combatFX.spawnSparks(ev.x, ev.y, ev.z, 18, false);
@@ -350,7 +356,6 @@ function boot() {
       if (ev.type === 'player_died') handleLeftForDead();
     }
 
-    // Contextual Prompts: Stealth Rob -> Corpse Loot/Drag -> Boundary Cairn -> Bramble
     const stealthVictim = !mount.mounted && combat.dragTargetId === null ? redcoats.findStealthVictim(player.x, player.z, player.facingYaw) : null;
     const nearCorpse = !mount.mounted && combat.dragTargetId === null ? redcoats.findNearestCorpse(player.x, player.z, 2.6) : null;
     const cairn = worldState.cairns[0];
@@ -408,7 +413,6 @@ function boot() {
     renderer.update(frameDt, player, mount, combat, redcoats, worldState);
     renderer.render();
 
-    // Update Diegetic HUD & Aim Reticle
     const showReticle = (combat.weapon === 'bow' && combat.bowDrawing) || (combat.weapon === 'flintlock' && combat.flintlockReloadTimer <= 0);
     reticle?.classList.toggle('hidden', !showReticle);
     if (reticle && showReticle) {
