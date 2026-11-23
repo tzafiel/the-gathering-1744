@@ -7,10 +7,12 @@ import {
   exportWorldStateJSON,
   importWorldStateJSON
 } from './world/worldState.js';
-import { getRegionName, LANDMARKS, WATER_LEVEL } from './world/terrain.js';
+import { getRegionName, heightAt, LANDMARKS, WATER_LEVEL } from './world/terrain.js';
 import { PlayerController } from './sim/player.js';
+import { MountController } from './sim/mount.js';
 import { OnixField } from './sim/onixField.js';
 import { WorldRenderer } from './render/worldRenderer.js';
+import { HighlandAudio } from './audio/synth.js';
 
 const FIXED_DT = 1 / 60;
 const WEATHER_STATES = ['clear', 'mist', 'rain'];
@@ -26,6 +28,9 @@ function boot() {
   const touchControls = document.getElementById('touch-controls');
 
   const staminaFill = document.getElementById('stamina-fill');
+  const mountHud = document.getElementById('mount-hud');
+  const mountStaminaFill = document.getElementById('mount-stamina-fill');
+  const mountBondLabel = document.getElementById('mount-bond-label');
   const stancePill = document.getElementById('stance-pill');
   const surfacePill = document.getElementById('surface-pill');
   const wetnessPill = document.getElementById('wetness-pill');
@@ -40,8 +45,10 @@ function boot() {
 
   let worldState = loadWorldState();
   let player = new PlayerController(worldState);
+  let mount = new MountController(worldState);
   const onixField = new OnixField(64, worldState.worldSeed || 1744);
   const input = new InputManager(canvas);
+  const audio = new HighlandAudio();
   const renderer = new WorldRenderer(canvas, onixField);
 
   try {
@@ -56,18 +63,32 @@ function boot() {
   let paused = true;
   let lastRegionKey = '';
   let bannerTimer = 0;
+  let noticeTimer = 0;
+  let noticeText = '';
   let autoSaveTimer = 0;
+  let elapsed = 0;
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+  function showNotice(text, seconds = 2.4) {
+    noticeText = text;
+    noticeTimer = seconds;
+  }
+
+  function syncAndSave() {
+    player.syncToWorldState(worldState);
+    mount.syncToWorldState(worldState);
+    saveWorldState(worldState);
+  }
 
   function setPaused(next) {
     paused = next;
     overlay.classList.toggle('hidden', !paused);
     if (isTouch) touchControls.classList.toggle('hidden', paused);
     if (!paused) {
+      audio.unlock();
       input.clearTransient();
     } else {
-      player.syncToWorldState(worldState);
-      saveWorldState(worldState);
+      syncAndSave();
       overlayStatus.textContent = `Saved locally · ${renderer.getBackendName()} · Day ${worldState.dayCount}`;
     }
   }
@@ -78,7 +99,7 @@ function boot() {
   });
 
   document.getElementById('btn-export').addEventListener('click', () => {
-    player.syncToWorldState(worldState);
+    syncAndSave();
     exportWorldStateJSON(worldState);
     overlayStatus.textContent = 'Exported 1744 portable JSON save.';
   });
@@ -91,6 +112,8 @@ function boot() {
     try {
       worldState = await importWorldStateJSON(file);
       player = new PlayerController(worldState);
+      mount = new MountController(worldState);
+      renderer.camPos.set(0, 0, 0);
       overlayStatus.textContent = `Loaded 1744 save (Day ${worldState.dayCount}).`;
     } catch (err) {
       overlayStatus.textContent = err.message;
@@ -102,10 +125,11 @@ function boot() {
     worldState = createDefaultWorldState();
     saveWorldState(worldState);
     player = new PlayerController(worldState);
+    mount = new MountController(worldState);
     renderer.camPos.set(0, 0, 0);
-    renderer.update(FIXED_DT, player, worldState);
+    renderer.update(FIXED_DT, player, mount, worldState);
     renderer.render();
-    overlayStatus.textContent = 'World reset to Golden Dusk 1744 ridge vantage.';
+    overlayStatus.textContent = 'World reset to Golden Dusk 1744 — Bramble awaits nearby.';
   });
 
   window.addEventListener('resize', () => renderer.resize());
@@ -132,7 +156,7 @@ function boot() {
 
   overlayStatus.textContent = `Ready · ${renderer.getBackendName()} · Day ${worldState.dayCount}`;
 
-  renderer.update(FIXED_DT, player, worldState);
+  renderer.update(FIXED_DT, player, mount, worldState);
   renderer.render();
   telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m`;
 
@@ -155,6 +179,8 @@ function boot() {
       return;
     }
 
+    elapsed += frameDt;
+
     if (frameInput.weatherToggle) {
       const idx = WEATHER_STATES.indexOf(worldState.weather?.state || 'clear');
       worldState.weather = {
@@ -165,6 +191,51 @@ function boot() {
 
     if (frameInput.oilToggle) {
       renderer.toggleOilMode();
+    }
+
+    if (frameInput.muteToggle) {
+      const muted = audio.toggleMute();
+      showNotice(muted ? 'AUDIO MUTED' : 'HIGHLAND AUDIO ACTIVE', 1.8);
+    }
+
+    // Whistle for Bramble from anywhere across the highlands
+    if (frameInput.whistle && !mount.mounted) {
+      audio.playWhistle();
+      mount.callTo(player.x, player.z);
+      showNotice(`WHISTLED FOR ${mount.name.toUpperCase()}`, 2.2);
+    }
+
+    // Mount / Dismount Bramble
+    const distToMount = mount.distanceTo(player.x, player.z);
+    if (frameInput.mountToggle) {
+      if (mount.mounted) {
+        // Dismount cleanly to Bramble's left flank
+        mount.mounted = false;
+        mount.aiState = 'IDLE';
+        mount.aiTimer = 3.5;
+        const leftX = mount.x - Math.cos(mount.yaw) * 1.45;
+        const leftZ = mount.z + Math.sin(mount.yaw) * 1.45;
+        player.x = leftX;
+        player.z = leftZ;
+        player.y = heightAt(leftX, leftZ);
+        player.vx = 0;
+        player.vz = 0;
+        player.vy = 0;
+        player.grounded = true;
+        audio.playStep(player.surface.id, 0.7, false, 0);
+      } else if (distToMount < 3.8) {
+        mount.mounted = true;
+        mount.aiState = 'IDLE';
+        audio.playHorseVocal('nicker', 0);
+        showNotice(`MOUNTED ${mount.name.toUpperCase()} · BOND ${Math.round(mount.bond * 100)}%`, 2.2);
+      }
+    }
+
+    // Brush / calm Bramble (works beside him or patting his neck from the saddle)
+    if (frameInput.tend && (mount.mounted || distToMount < 3.8)) {
+      if (mount.tendMount()) {
+        showNotice(`CALMED ${mount.name.toUpperCase()} · BOND ${Math.round(mount.bond * 100)}%`, 2.2);
+      }
     }
 
     const wState = worldState.weather?.state || 'clear';
@@ -179,47 +250,90 @@ function boot() {
       worldState.timeOfDay += 24;
     }
 
+    // 60Hz deterministic simulation loop
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
-      player.update(FIXED_DT, frameInput);
+      if (!mount.mounted) {
+        player.update(FIXED_DT, frameInput);
+      }
+      mount.update(FIXED_DT, frameInput, player, rainIntensity);
+
       if (rainIntensity > 0) {
         player.wetness = clamp(player.wetness + 0.065 * FIXED_DT, 0, 1);
       }
+
       onixField.step(FIXED_DT, rainIntensity, windStrength);
-      onixField.stepWaterRipples(FIXED_DT, player.x, player.y, player.z, player.speed, WATER_LEVEL);
+
+      // Feed active wading entity (Bramble's hooves when mounted, Callum's boots on foot) into wave solver
+      const wX = mount.mounted ? mount.x : player.x;
+      const wY = mount.mounted ? mount.y : player.y;
+      const wZ = mount.mounted ? mount.z : player.z;
+      const wSpd = mount.mounted ? mount.speed * 1.35 : player.speed;
+      onixField.stepWaterRipples(FIXED_DT, wX, wY, wZ, wSpd, WATER_LEVEL);
+
       accumulator -= FIXED_DT;
     }
 
+    // Dispatch procedural Web Audio events
+    audio.updateAmbient(frameDt, player.x, player.y, player.z, onixField, rainIntensity, elapsed);
+    for (const ev of player.consumeEvents()) {
+      if (ev.type === 'step') audio.playStep(ev.surfaceId, ev.intensity, false, 0);
+    }
+    for (const ev of mount.consumeEvents()) {
+      if (ev.type === 'hoof') audio.playStep(ev.surfaceId, ev.intensity, true, ev.dist);
+      if (ev.type === 'vocal') audio.playHorseVocal(ev.kind, ev.dist);
+    }
+
+    // Contextual interaction prompt (Notice -> Boundary Cairn -> Bramble)
     const cairn = worldState.cairns[0];
     const dCairn = Math.hypot(player.x - LANDMARKS.stashCairn.x, player.z - LANDMARKS.stashCairn.z);
-    if (dCairn < 4.0) {
+
+    if (noticeTimer > 0) {
+      noticeTimer -= frameDt;
+      interactPrompt.classList.remove('hidden');
+      interactPrompt.textContent = noticeText;
+    } else if (!mount.mounted && dCairn < 4.0) {
       interactPrompt.classList.remove('hidden');
       interactPrompt.textContent = cairn.discovered
         ? 'OLD CAIRN · Stash Logged (1 French Flintlock, 8s)'
         : '[E] Inspect Boundary Cairn Stash';
       if (frameInput.interact && !cairn.discovered) {
         cairn.discovered = true;
-        player.syncToWorldState(worldState);
-        saveWorldState(worldState);
+        syncAndSave();
+        showNotice('STASH LOGGED · FRENCH FLINTLOCK & 8 SHILLINGS', 3.0);
       }
+    } else if (!mount.mounted && distToMount < 3.8) {
+      interactPrompt.classList.remove('hidden');
+      interactPrompt.textContent = `[F] Mount ${mount.name}  ·  [G] Brush & Calm (${Math.round(mount.bond * 100)}%)`;
     } else {
       interactPrompt.classList.add('hidden');
     }
 
-    renderer.update(frameDt, player, worldState);
+    renderer.update(frameDt, player, mount, worldState);
     renderer.render();
 
+    // Update minimal diegetic HUD
     staminaFill.style.width = `${Math.round(player.stamina * 100)}%`;
+    const showMountHud = mount.mounted || distToMount < 11.0;
+    mountHud?.classList.toggle('hidden', !showMountHud);
+    if (showMountHud) {
+      mountStaminaFill.style.width = `${Math.round(mount.stamina * 100)}%`;
+      mountBondLabel.textContent = `${mount.name.toUpperCase()} · ${Math.round(mount.bond * 100)}%`;
+    }
+
     stancePill.textContent = player.stance;
     surfacePill.textContent = player.surface.label;
     wetnessPill.textContent = player.wetness > 0.55 ? 'SOAKED' : player.wetness > 0.15 ? 'DAMP' : 'DRY';
     if (weatherPill) weatherPill.textContent = WEATHER_LABELS[wState] || 'SUNBREAK';
     clockReadout.textContent = formatClock(worldState.timeOfDay);
     compassTape.textContent = formatCompass(player.camYaw);
-    telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m${frameInput.gamepadConnected ? ' · PAD' : ''}`;
+    telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m${frameInput.gamepadConnected ? ' · PAD' : ''}${audio.muted ? ' · MUTE' : ''}`;
 
     const reg = getRegionName(player.x, player.z);
     if (reg.title !== lastRegionKey) {
+      if (lastRegionKey !== '' && reg.title !== 'LOCHABER GLEN') {
+        audio.playRegionChord();
+      }
       lastRegionKey = reg.title;
       regionTitle.textContent = reg.title;
       regionSub.textContent = reg.sub;
@@ -233,8 +347,7 @@ function boot() {
     autoSaveTimer += frameDt;
     if (autoSaveTimer >= 15) {
       autoSaveTimer = 0;
-      player.syncToWorldState(worldState);
-      saveWorldState(worldState);
+      syncAndSave();
     }
   }
 
