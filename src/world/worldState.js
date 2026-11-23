@@ -2,10 +2,10 @@ import { heightAt, LANDMARKS } from './terrain.js';
 
 const STORAGE_KEY = 'the_gathering_1744_save_v1';
 
-// Canonical serializable world state — engineered for 1744 offline play & 1747 sequel carryover
 export function createDefaultWorldState() {
-  const spawnX = -22;
-  const spawnZ = 22;
+  // Dramatic ridge vantage overlooking Baile MacRae, Loch Linnhe, and Torr an Fhaire
+  const spawnX = 36;
+  const spawnZ = 34;
 
   return {
     schemaVersion: 1,
@@ -13,7 +13,7 @@ export function createDefaultWorldState() {
     worldSeed: 1744,
     savedAt: new Date().toISOString(),
     dayCount: 1,
-    timeOfDay: 15.5, // Crisp bright afternoon sunbreak
+    timeOfDay: 18.6, // Golden Atlantic sunbreak low over Loch Linnhe
     weather: {
       state: 'clear',
       intensity: 0.0
@@ -23,7 +23,7 @@ export function createDefaultWorldState() {
       x: spawnX,
       y: heightAt(spawnX, spawnZ),
       z: spawnZ,
-      yaw: -0.65,
+      yaw: 0.92, // Facing NW across the smoking cottages, sea loch, and watchtower ridge
       stamina: 1.0,
       wetness: 0.0,
       silverShillings: 14,
@@ -81,9 +81,7 @@ export function saveWorldState(state) {
   state.savedAt = new Date().toISOString();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (_) {
-    // Private browsing quota fallback
-  }
+  } catch (_) {}
 }
 
 export function exportWorldStateJSON(state) {
