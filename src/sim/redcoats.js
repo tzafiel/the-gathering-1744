@@ -1,11 +1,6 @@
 import { heightAt, roadCenterX, LANDMARKS, WATER_LEVEL } from '../world/terrain.js';
 import { clamp, lerp, mulberry32 } from '../core/prng.js';
 
-// Non-Scripted GOAP Hanoverian Redcoat Patrol Squad (44th/42nd Garrison Detachment).
-// Operates out of Torr an Fhaire along General Wade's Road with real sight cones,
-// sound/gunsmoke investigation, Brown Bess musket volleys (affected by rain misfires!),
-// telegraphed bayonet duels, squad morale break, pickpocketing, and modular dismemberment.
-
 export class RedcoatManager {
   constructor(seed = 1744) {
     this.rng = mulberry32(seed + 4401);
@@ -23,7 +18,6 @@ export class RedcoatManager {
 
   spawnSquad() {
     this.soldiers = [];
-    // Patrol route running from Torr an Fhaire ridge down General Wade's Road and back
     const route = [
       { x: LANDMARKS.watchtower.x - 16, z: LANDMARKS.watchtower.z - 6 },
       { x: roadCenterX(-40), z: -40 },
@@ -40,7 +34,6 @@ export class RedcoatManager {
       { id: 'rc_pvt3', rank: 'PRIVATE', isOfficer: false, offset: { x: 0.0, z: 4.5 }, hp: 0.92 }
     ];
 
-    // Start the squad marching along Wade's Road within striking distance of Baile MacRae overlook
     const startX = roadCenterX(10);
     const startZ = 10;
 
@@ -69,7 +62,6 @@ export class RedcoatManager {
         fallDirZ: 1,
         hiddenInHeather: false,
 
-        // Modular severable anatomy flags (rendered by redcoatMesh.js & launched by combatFX.js)
         severed: { head: false, rightArm: false, leftArm: false },
         hatLost: false,
         robbed: false,
@@ -77,9 +69,8 @@ export class RedcoatManager {
         silver: r.isOfficer ? 9 : 4,
         powder: r.isOfficer ? 3 : 2,
 
-        // GOAP AI State
-        aiState: 'PATROL', // PATROL | INVESTIGATE | AIM_MUSKET | RELOAD | CHARGE | MELEE | STAGGERED | RETREAT
-        awareness: 0, // 0..1
+        aiState: 'PATROL',
+        awareness: 0,
         alertPos: { x: sx, z: sz },
         route,
         wpIndex: 2,
@@ -91,13 +82,13 @@ export class RedcoatManager {
         staggerTimer: 0,
         hitFlashTimer: 0,
 
-        // Telegraphed bayonet melee attack cycle (readable without HUD icons!)
-        attackPhase: 'NONE', // 'NONE' | 'WINDUP' | 'STRIKE' | 'RECOVER'
+        attackPhase: 'NONE',
         attackTimer: 0,
         attackDealt: false,
         meleeCooldown: 0.8 + i * 0.25,
         guarding: false,
-        stateTimer: 0
+        stateTimer: 0,
+        flankSign: i % 2 === 0 ? 1 : -1
       });
     }
   }
@@ -112,7 +103,6 @@ export class RedcoatManager {
     );
   }
 
-  // Notify nearby patrols of gunshots, horse gallops, or whistles
   notifyNoise(x, z, radius, loud = true) {
     for (const s of this.soldiers) {
       if (s.dead) continue;
@@ -130,7 +120,6 @@ export class RedcoatManager {
     }
   }
 
-  // Finds an unaware Redcoat whose back Callum is directly behind (for Silent Dirk Kill or Pickpocket)
   findStealthVictim(px, pz, playerYaw) {
     const pFwdX = -Math.sin(playerYaw);
     const pFwdZ = -Math.cos(playerYaw);
@@ -144,7 +133,6 @@ export class RedcoatManager {
 
       const sFwdX = -Math.sin(s.yaw);
       const sFwdZ = -Math.cos(s.yaw);
-      // Callum must be behind the soldier and facing his back
       const behindDot = (dx * sFwdX + dz * sFwdZ) / (dist || 1);
       const facingDot = (dx * pFwdX + dz * pFwdZ) / (dist || 1);
       if (behindDot > 0.25 && facingDot > 0.45) {
@@ -168,7 +156,6 @@ export class RedcoatManager {
     return best;
   }
 
-  // Pickpocket an unaware sentry from behind without alerting him (unless you bump into him)
   robSoldier(soldier, worldState, combat) {
     if (!soldier || soldier.dead || soldier.robbed) return null;
     soldier.robbed = true;
@@ -181,7 +168,6 @@ export class RedcoatManager {
     return { silver: gainedSilver, powder: gainedPowder };
   }
 
-  // Loot a downed Redcoat
   lootCorpse(soldier, worldState, combat) {
     if (!soldier || !soldier.dead || soldier.looted) return null;
     soldier.looted = true;
@@ -197,7 +183,6 @@ export class RedcoatManager {
   applyDamage(soldier, { damage, heavy, dirX, dirY, dirZ, source, momentum = 1.0, headshot = false }) {
     if (soldier.dead) return { blocked: false, killed: false, severPart: null };
 
-    // Bayonet guard blocks light frontal swings when soldier is ready in melee stance
     const sFwdX = -Math.sin(soldier.yaw);
     const sFwdZ = -Math.cos(soldier.yaw);
     const fromFront = (dirX * sFwdX + dirZ * sFwdZ) < -0.2;
@@ -213,7 +198,6 @@ export class RedcoatManager {
     soldier.vx += dirX * (heavy ? 5.5 : 2.8) * momentum;
     soldier.vz += dirZ * (heavy ? 5.5 : 2.8) * momentum;
 
-    // Alert entire nearby squad immediately when a comrade is struck in open combat
     if (source !== 'dirk_stealth') {
       this.notifyNoise(soldier.x, soldier.z, 34, source === 'musket_ball');
       soldier.aiState = 'MELEE';
@@ -234,7 +218,6 @@ export class RedcoatManager {
       soldier.attackPhase = 'NONE';
       soldier.hatLost = true;
 
-      // Heavy broadsword cleaves, horseback momentum slashes, or headshots trigger modular dismemberment!
       if (source === 'sword' && (heavy || momentum > 1.35)) {
         const roll = this.rng();
         if (headshot || roll < 0.48) {
@@ -266,7 +249,6 @@ export class RedcoatManager {
         isOfficer: soldier.isOfficer
       });
 
-      // Morale check: if Corporal falls and <= 2 privates remain, survivors may panic & fall back to Torr an Fhaire!
       if (soldier.isOfficer) {
         for (const mate of this.soldiers) {
           if (!mate.dead && this.rng() < 0.55) {
@@ -282,9 +264,10 @@ export class RedcoatManager {
     return { blocked: false, killed: false, severPart: null };
   }
 
-  update(dt, player, mount, combat, rainIntensity) {
+  update(dt, player, mount, combat, rainIntensity, colliders = null) {
     const stealth = combat.stealthFactor;
     const visionRange = lerp(52.0, 11.5, stealth);
+    const playerEyeY = combat.getEyeHeight(player, mount) - 0.14;
     const livingLeader = this.soldiers.find((s) => !s.dead && s.isOfficer) || this.soldiers.find((s) => !s.dead);
 
     for (const s of this.soldiers) {
@@ -292,11 +275,14 @@ export class RedcoatManager {
 
       if (s.dead) {
         s.deathTimer = Math.min(s.deathTimer + dt, 2.0);
-        // Apply knockback slide damping on hillside
         s.vx *= Math.exp(-7 * dt);
         s.vz *= Math.exp(-7 * dt);
         s.x += s.vx * dt;
         s.z += s.vz * dt;
+        if (colliders) {
+          const hit = colliders.resolveCircle(s.x, s.z, 0.45, s.y);
+          if (hit.collided) { s.x = hit.x; s.z = hit.z; }
+        }
         s.y = heightAt(s.x, s.z);
         continue;
       }
@@ -310,7 +296,6 @@ export class RedcoatManager {
       const fwdZ = -Math.cos(s.yaw);
       const dotToPlayer = (dxP * fwdX + dzP * fwdZ) / (distP || 1);
 
-      // Vision cone check (blocked by black-powder gunsmoke!)
       let smokeBlocked = false;
       for (const sm of combat.smokeZones) {
         if (Math.hypot(s.x - sm.x, s.z - sm.z) < sm.radius + 3.0) {
@@ -319,22 +304,22 @@ export class RedcoatManager {
         }
       }
 
-      const canSeePlayer =
-        !smokeBlocked &&
-        combat.health > 0 &&
-        distP < visionRange &&
-        (dotToPlayer > 0.25 || distP < (player.crouchBlend > 0.5 ? 2.6 : 5.5));
+      // True 3D Line-of-Sight check: stone cottages, dykes, boulders & thick pines hide Callum!
+      const inCone = distP < visionRange && (dotToPlayer > 0.25 || distP < (player.crouchBlend > 0.5 ? 2.6 : 5.5));
+      const hasLOS = inCone && !smokeBlocked && (!colliders || colliders.hasLineOfSight(s.x, s.y + 1.52, s.z, player.x, playerEyeY, player.z));
+      const canSeePlayer = hasLOS && combat.health > 0;
 
-      // Check if sentry spots a dead comrade lying exposed (not hidden in heather!)
       if (s.aiState === 'PATROL') {
         for (const other of this.soldiers) {
           if (other.dead && !other.hiddenInHeather && Math.hypot(other.x - s.x, other.z - s.z) < 16) {
-            s.alertPos.x = other.x;
-            s.alertPos.z = other.z;
-            s.aiState = 'INVESTIGATE';
-            s.stateTimer = 14.0;
-            this.events.push({ type: 'bark', kind: 'alert', dist: distP });
-            break;
+            if (!colliders || colliders.hasLineOfSight(s.x, s.y + 1.5, s.z, other.x, other.y + 0.4, other.z)) {
+              s.alertPos.x = other.x;
+              s.alertPos.z = other.z;
+              s.aiState = 'INVESTIGATE';
+              s.stateTimer = 14.0;
+              this.events.push({ type: 'bark', kind: 'alert', dist: distP });
+              break;
+            }
           }
         }
       }
@@ -354,7 +339,6 @@ export class RedcoatManager {
         s.awareness = Math.max(0, s.awareness - dt * 0.14);
       }
 
-      // Staggered state (vulnerable to instant riposte after Callum's Perfect Parry or Targe Bash!)
       if (s.staggerTimer > 0) {
         s.staggerTimer -= dt;
         s.guarding = false;
@@ -369,20 +353,38 @@ export class RedcoatManager {
       } else if (s.aiState === 'INVESTIGATE') {
         this._stepInvestigate(dt, s);
       } else if (s.aiState === 'AIM_MUSKET') {
-        this._stepAimMusket(dt, s, player, mount, combat, distP, dxP, dzP, rainIntensity);
+        this._stepAimMusket(dt, s, player, mount, combat, distP, dxP, dzP, rainIntensity, hasLOS);
       } else if (s.aiState === 'RELOAD') {
         this._stepReload(dt, s, distP);
       } else if (s.aiState === 'CHARGE') {
-        this._stepCharge(dt, s, distP, dxP, dzP);
+        this._stepCharge(dt, s, distP);
       } else if (s.aiState === 'MELEE') {
-        this._stepMelee(dt, s, player, mount, combat, distP, dxP, dzP);
+        this._stepMelee(dt, s, player, mount, combat, distP, dxP, dzP, hasLOS);
       } else if (s.aiState === 'RETREAT') {
         this._stepRetreat(dt, s);
       }
 
-      // Apply movement & ground height
+      // Move & resolve solid obstacles (with tangent flanking nudge so soldiers steer around corners)
       s.x += s.vx * dt;
       s.z += s.vz * dt;
+      if (colliders) {
+        const hit = colliders.resolveCircle(s.x, s.z, 0.45, s.y);
+        if (hit.collided) {
+          s.x = hit.x;
+          s.z = hit.z;
+          const inward = s.vx * hit.nx + s.vz * hit.nz;
+          if (inward < 0) {
+            s.vx -= inward * hit.nx;
+            s.vz -= inward * hit.nz;
+            // Slide briskly around wall edge rather than stalling head-on
+            const tanX = -hit.nz * s.flankSign;
+            const tanZ = hit.nx * s.flankSign;
+            s.vx += tanX * 1.4;
+            s.vz += tanZ * 1.4;
+          }
+        }
+      }
+
       const gy = heightAt(s.x, s.z);
       if (gy < WATER_LEVEL - 0.5) {
         s.x -= s.vx * dt;
@@ -446,13 +448,11 @@ export class RedcoatManager {
     if (dist < 2.2 || s.stateTimer <= 0) {
       s.vx *= 0.85;
       s.vz *= 0.85;
-      if (s.stateTimer <= 0) {
-        s.aiState = 'PATROL';
-      }
+      if (s.stateTimer <= 0) s.aiState = 'PATROL';
     }
   }
 
-  _stepAimMusket(dt, s, player, mount, combat, distP, dxP, dzP, rainIntensity) {
+  _stepAimMusket(dt, s, player, mount, combat, distP, dxP, dzP, rainIntensity, hasLOS) {
     s.vx = lerp(s.vx, 0, 1 - Math.exp(-8 * dt));
     s.vz = lerp(s.vz, 0, 1 - Math.exp(-8 * dt));
     const desiredYaw = Math.atan2(-dxP, -dzP);
@@ -461,7 +461,11 @@ export class RedcoatManager {
     while (diff < -Math.PI) diff += Math.PI * 2;
     s.yaw += diff * (1 - Math.exp(-7 * dt));
 
-    // If Callum closes inside 6.5m during aim, fix bayonet and charge!
+    // If Callum ducks behind a solid stone wall or closes in, stop shooting walls & advance!
+    if (!hasLOS) {
+      s.aiState = 'CHARGE';
+      return;
+    }
     if (distP < 6.5) {
       s.aiState = 'MELEE';
       return;
@@ -474,7 +478,6 @@ export class RedcoatManager {
     s.aimTimer -= dt;
     if (s.aimTimer <= 0) {
       s.musketLoaded = false;
-      // Redcoat Brown Bess muskets also misfire in driving Highland rain!
       if (Math.random() < rainIntensity * 0.45) {
         combat.events.push({ type: 'misfire', x: s.x, y: s.y + 1.4, z: s.z, owner: 'enemy' });
         s.aiState = 'CHARGE';
@@ -502,25 +505,28 @@ export class RedcoatManager {
     }
   }
 
-  _stepCharge(dt, s, distP, dxP, dzP) {
+  _stepCharge(dt, s, distP) {
     if (distP > 65) {
       s.aiState = 'PATROL';
       return;
     }
-    this._steerToward(dt, s, s.alertPos.x, s.alertPos.z, 4.9);
+    const dAlert = this._steerToward(dt, s, s.alertPos.x, s.alertPos.z, 4.9);
     if (distP < 3.0) {
       s.aiState = 'MELEE';
+    } else if (dAlert < 1.8 && distP > 14) {
+      s.aiState = 'INVESTIGATE';
+      s.stateTimer = 7.0;
     }
   }
 
-  _stepMelee(dt, s, player, mount, combat, distP, dxP, dzP) {
+  _stepMelee(dt, s, player, mount, combat, distP, dxP, dzP, hasLOS) {
     if (combat.health <= 0 || distP > 55) {
       s.aiState = 'PATROL';
       s.attackPhase = 'NONE';
       return;
     }
     if (distP > 6.5 && s.attackPhase === 'NONE') {
-      s.aiState = s.musketLoaded ? 'AIM_MUSKET' : 'CHARGE';
+      s.aiState = (s.musketLoaded && hasLOS) ? 'AIM_MUSKET' : 'CHARGE';
       s.aimTimer = 1.1;
       return;
     }
@@ -536,7 +542,6 @@ export class RedcoatManager {
       if (distP > 2.35) {
         this._steerToward(dt, s, player.x, player.z, 3.6);
       } else {
-        // Subtle circling footwork in bayonet range
         s.vx = lerp(s.vx, 0, 1 - Math.exp(-7 * dt));
         s.vz = lerp(s.vz, 0, 1 - Math.exp(-7 * dt));
         if (s.meleeCooldown <= 0) {
@@ -549,7 +554,6 @@ export class RedcoatManager {
       return;
     }
 
-    // Telegraphed Bayonet Lunge / Officer Saber Slash (0.48s clear wind-up so Callum can read & parry!)
     s.attackTimer += dt;
     if (s.attackPhase === 'WINDUP') {
       s.vx *= 0.85;
