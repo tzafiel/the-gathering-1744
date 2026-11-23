@@ -89,7 +89,7 @@ export class MountController {
     return Math.hypot(px - this.x, pz - this.z);
   }
 
-  update(dt, input, player, rainIntensity = 0) {
+  update(dt, input, player, rainIntensity = 0, colliders = null) {
     if (this.careTimer > 0) this.careTimer = Math.max(0, this.careTimer - dt);
     if (this.rearTimer > 0) this.rearTimer = Math.max(0, this.rearTimer - dt);
 
@@ -98,9 +98,9 @@ export class MountController {
     const slope = 1 - n.y;
 
     if (this.mounted) {
-      this._updateMounted(dt, input, player, n, slope, rainIntensity);
+      this._updateMounted(dt, input, player, n, slope, rainIntensity, colliders);
     } else {
-      this._updateAutonomous(dt, player, n, slope, rainIntensity);
+      this._updateAutonomous(dt, player, n, slope, rainIntensity, colliders);
     }
 
     if (this.y < WATER_LEVEL + 0.15) {
@@ -150,10 +150,9 @@ export class MountController {
     }
   }
 
-  _updateMounted(dt, input, player, n, slope, rainIntensity) {
+  _updateMounted(dt, input, player, n, slope, rainIntensity, colliders) {
     this.grazeBlend = lerp(this.grazeBlend, 0, 1 - Math.exp(-8 * dt));
 
-    // Free First-Person head look from Bramble's saddle (independent of horse heading!)
     player.camYaw -= input.lookX;
     player.camPitch = clamp(player.camPitch + input.lookY, -1.15, 1.15);
 
@@ -163,11 +162,10 @@ export class MountController {
     const speedRatio = clamp(this.speed / 14.0, 0, 1);
     const turnRate = lerp(2.15, 1.05, speedRatio) * (this.surface.id === 'peat_bog' ? 0.78 : 1.0);
 
-    // Direct rein steering with A/D; subtle gaze guidance only when looking forward & not aiming sideways
     if (Math.abs(steerInput) > 0.05) {
       const yawDelta = -steerInput * turnRate * dt;
       this.yaw += yawDelta;
-      player.camYaw += yawDelta; // Rider's torso turns naturally with Bramble's shoulders
+      player.camYaw += yawDelta;
     } else if (forwardInput > 0.25 && this.speed > 1.2) {
       let diff = player.camYaw - this.yaw;
       while (diff > Math.PI) diff -= Math.PI * 2;
@@ -216,7 +214,7 @@ export class MountController {
       this.events.push({ type: 'vocal', kind: 'snort', dist: 0 });
     }
 
-    this._integratePhysics(dt);
+    this._integratePhysics(dt, colliders);
 
     this.speed = Math.hypot(this.vx, this.vz);
     if (signedSpeed < -0.25) this.gait = 'BACKING';
@@ -238,7 +236,6 @@ export class MountController {
 
     if (this.speed > 1.5) this.bond = clamp(this.bond + 0.0008 * dt, 0, 1);
 
-    // Sync Callum's position to saddle while keeping facingYaw aligned with his First-Person eyes
     player.x = this.x;
     player.y = this.y + 1.08;
     player.z = this.z;
@@ -252,7 +249,7 @@ export class MountController {
     player.stamina = clamp(player.stamina + 0.18 * dt, 0, 1);
   }
 
-  _updateAutonomous(dt, player, n, slope, rainIntensity) {
+  _updateAutonomous(dt, player, n, slope, rainIntensity, colliders) {
     this.aiTimer -= dt;
     let targetSpeed = 0;
 
@@ -316,7 +313,7 @@ export class MountController {
     this.vx = lerp(this.vx, fwdX * targetSpeed, blend);
     this.vz = lerp(this.vz, fwdZ * targetSpeed, blend);
 
-    this._integratePhysics(dt);
+    this._integratePhysics(dt, colliders);
 
     this.speed = Math.hypot(this.vx, this.vz);
     this.gait =
@@ -329,11 +326,25 @@ export class MountController {
     this.stamina = clamp(this.stamina + 0.16 * dt, 0, 1);
   }
 
-  _integratePhysics(dt) {
+  _integratePhysics(dt, colliders) {
     this.vy -= 17.5 * dt;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
     this.y += this.vy * dt;
+
+    // Solid world collision for Bramble (slides smoothly past pine trunks & stone walls)
+    if (colliders) {
+      const hit = colliders.resolveCircle(this.x, this.z, 0.82, this.y);
+      if (hit.collided) {
+        this.x = hit.x;
+        this.z = hit.z;
+        const inward = this.vx * hit.nx + this.vz * hit.nz;
+        if (inward < 0) {
+          this.vx -= inward * hit.nx;
+          this.vz -= inward * hit.nz;
+        }
+      }
+    }
 
     const nextGroundY = heightAt(this.x, this.z);
     if (nextGroundY < WATER_LEVEL - 0.95) {
