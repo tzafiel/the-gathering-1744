@@ -1,0 +1,12 @@
+{
+  "name": "1744 — The Gathering",
+  "short_name": "1744 Highland",
+  "description": "Deterministic 3D open-world Scottish Highlands historical sandbox.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#16201b",
+  "theme_color": "#1d2b24",
+  "icons": []
+}
