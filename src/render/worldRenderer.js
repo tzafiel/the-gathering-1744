@@ -1,4 +1,4 @@
-import * as THREE from 'three/webgpu';
+import * as THREE from 'three';
 import {
   heightAt,
   normalAt,
@@ -11,7 +11,7 @@ import {
 import { mulberry32, clamp, lerp } from '../core/prng.js';
 
 const CHUNK_SIZE = 120;
-const CHUNK_RADIUS = 4; // 9x9 streaming chunks (~1.08 km active view radius)
+const CHUNK_RADIUS = 4;
 
 export class WorldRenderer {
   constructor(canvas) {
@@ -26,17 +26,17 @@ export class WorldRenderer {
     this.elapsed = 0;
   }
 
-  async init() {
-    this.renderer = new THREE.WebGPURenderer({
+  init() {
+    this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true
+      antialias: true,
+      powerPreference: 'high-performance'
     });
-    await this.renderer.init();
 
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
 
@@ -57,7 +57,7 @@ export class WorldRenderer {
   }
 
   getBackendName() {
-    return this.renderer?.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+    return 'WebGL2';
   }
 
   _setupLighting() {
@@ -79,7 +79,6 @@ export class WorldRenderer {
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    // Subtle sun disc in the sky
     this.sunDisc = new THREE.Mesh(
       new THREE.SphereGeometry(18, 16, 12),
       new THREE.MeshBasicMaterial({ color: 0xfff5d8, fog: false })
@@ -163,7 +162,7 @@ export class WorldRenderer {
     this.scene.add(hearthLight);
     this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 14, phase: 0.4 });
 
-    // 2. Hanoverian Redcoat Watchtower overlooking Wade's Road
+    // 2. Hanoverian Watchtower
     const tw = LANDMARKS.watchtower;
     const twY = heightAt(tw.x, tw.z);
     const towerGroup = new THREE.Group();
@@ -180,7 +179,6 @@ export class WorldRenderer {
     parapet.castShadow = true;
     towerGroup.add(parapet);
 
-    // Watchtower Flagpole & British Union Pennant
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6.5, 6), timberMat);
     pole.position.set(0, 16.0, 0);
     towerGroup.add(pole);
@@ -192,7 +190,6 @@ export class WorldRenderer {
     flag.position.set(1.3, 18.2, 0);
     towerGroup.add(flag);
 
-    // Twin Watchtower Braziers (visible from across the glen)
     for (const bx of [-3.6, 3.6]) {
       const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.35, 1.2, 6), darkStoneMat);
       stand.position.set(bx, 13.6, 0);
@@ -209,7 +206,7 @@ export class WorldRenderer {
     }
     this.scene.add(towerGroup);
 
-    // 3. Smuggling Cove Timber Jetty on Loch Linnhe
+    // 3. Smuggling Cove Timber Jetty
     const jt = LANDMARKS.coveJetty;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 3.2), timberMat);
     deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z);
@@ -301,6 +298,9 @@ export class WorldRenderer {
     }
     trunks.count = pineCount;
     crowns.count = pineCount;
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
 
     let rockCount = 0;
     for (let tries = 0; tries < 1200 && rockCount < maxRocks; tries++) {
@@ -326,16 +326,17 @@ export class WorldRenderer {
       rockCount++;
     }
     rocks.count = rockCount;
+    rocks.instanceMatrix.needsUpdate = true;
+    if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
 
     this.scene.add(trunks, crowns, rocks);
   }
 
   _buildCallumMesh() {
-    // Articulated procedural Highlander rig (swappable later via AssetRegistry for rigged GLB)
     this.callum = new THREE.Group();
 
     const woolCoatMat = new THREE.MeshStandardMaterial({ color: 0x3b3328, roughness: 0.92 });
-    const plaidMat = new THREE.MeshStandardMaterial({ color: 0x2f533b, roughness: 0.92 }); // Natural-dyed Lochaber moss plaid
+    const plaidMat = new THREE.MeshStandardMaterial({ color: 0x2f533b, roughness: 0.92 });
     const accentMat = new THREE.MeshStandardMaterial({ color: 0x7a2b25, roughness: 0.9 });
     const leatherMat = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 0.85 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xd9ad8b, roughness: 0.8 });
@@ -345,7 +346,6 @@ export class WorldRenderer {
     this.callumBody = new THREE.Group();
     this.callum.add(this.callumBody);
 
-    // Legs
     const legGeo = new THREE.CylinderGeometry(0.11, 0.09, 0.82, 7);
     legGeo.translate(0, -0.41, 0);
     this.leftLeg = new THREE.Mesh(legGeo, leatherMat);
@@ -357,19 +357,16 @@ export class WorldRenderer {
     this.rightLeg.castShadow = true;
     this.callumBody.add(this.leftLeg, this.rightLeg);
 
-    // Belted Kilt / Great Plaid Skirt
     const kilt = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 0.56, 8), plaidMat);
     kilt.position.y = 0.86;
     kilt.castShadow = true;
     this.callumBody.add(kilt);
 
-    // Torso
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.62, 0.30), woolCoatMat);
     torso.position.y = 1.32;
     torso.castShadow = true;
     this.callumBody.add(torso);
 
-    // Draped Great Plaid Shoulder Sash
     const sash = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.64, 0.33), accentMat);
     sash.position.set(-0.04, 1.34, 0.01);
     sash.scale.set(0.45, 1.0, 1.04);
@@ -377,7 +374,6 @@ export class WorldRenderer {
     sash.castShadow = true;
     this.callumBody.add(sash);
 
-    // Head & Blue Highland Bonnet
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), skinMat);
     head.position.y = 1.78;
     head.castShadow = true;
@@ -389,7 +385,6 @@ export class WorldRenderer {
     bonnet.castShadow = true;
     this.callumBody.add(bonnet);
 
-    // Arms
     const armGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.64, 6);
     armGeo.translate(0, -0.32, 0);
     this.leftArm = new THREE.Mesh(armGeo, woolCoatMat);
@@ -401,7 +396,6 @@ export class WorldRenderer {
     this.rightArm.castShadow = true;
     this.callumBody.add(this.leftArm, this.rightArm);
 
-    // Basket-Hilted Broadsword Scabbard at Left Hip
     const scabbard = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 1.08, 6), leatherMat);
     scabbard.position.set(-0.30, 0.92, 0.12);
     scabbard.rotation.x = 0.65;
@@ -483,7 +477,6 @@ export class WorldRenderer {
   }
 
   _updateSkyAndSun(timeOfDay, px, pz) {
-    // Sun elevation angle from 0..24h clock (sunrise ~05:30, sunset ~20:30 in Highland summer)
     const sunAngle = ((timeOfDay - 6) / 24) * Math.PI * 2;
     const elev = Math.sin(sunAngle);
     const horiz = Math.cos(sunAngle);
@@ -492,7 +485,6 @@ export class WorldRenderer {
     const dayFactor = clamp((elev + 0.08) / 0.45, 0, 1);
     const goldenFactor = clamp(1 - Math.abs(elev - 0.14) / 0.26, 0, 1);
 
-    // Snap shadow anchor to 2m grid to prevent shadow swimming
     const snapX = Math.round(px / 2) * 2;
     const snapZ = Math.round(pz / 2) * 2;
     const activeDir = elev > 0.02 ? sunDir : new THREE.Vector3(-0.4, 0.55, 0.5).normalize();
@@ -504,7 +496,6 @@ export class WorldRenderer {
     this.sunDisc.position.set(px + sunDir.x * 780, sunDir.y * 780, pz + sunDir.z * 780);
     this.sunDisc.visible = elev > -0.05;
 
-    // 1744 Atlantic sky & fog palette
     const nightSky = new THREE.Color(0x0c1522);
     const daySky = new THREE.Color(0x5e9cd4);
     const goldenSky = new THREE.Color(0xd98a52);
@@ -517,7 +508,6 @@ export class WorldRenderer {
     this.sunLight.color.setHex(elev > 0.02 ? (goldenFactor > 0.4 ? 0xffc688 : 0xfff3db) : 0x89a9d6);
     this.hemiLight.intensity = lerp(0.18, 0.78, dayFactor);
 
-    // Flickering peat fire & watchtower braziers
     for (const f of this.flickerLights) {
       const pulse = 0.88 + Math.sin(this.elapsed * 9.5 + f.phase) * 0.1 + Math.sin(this.elapsed * 21 + f.phase) * 0.06;
       const nightBoost = lerp(1.65, 0.75, dayFactor);
@@ -532,11 +522,9 @@ export class WorldRenderer {
     this._updateTerrainChunks(player.x, player.z);
     this._updateSkyAndSun(worldState.timeOfDay, player.x, player.z);
 
-    // Keep water plane centered under player
     this.waterMesh.position.x = Math.round(player.x / 50) * 50;
     this.waterMesh.position.z = Math.round(player.z / 50) * 50;
 
-    // Update Callum's 3D rig & grounded procedural gait
     this.callum.position.set(player.x, player.y, player.z);
     this.callum.rotation.y = player.facingYaw;
 
@@ -550,7 +538,6 @@ export class WorldRenderer {
     this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
     this.callumBody.rotation.x = player.crouchBlend * 0.28 + strideAmp * 0.06;
 
-    // Over-the-shoulder RDR2 camera with ground-clip guard
     const shoulderRight = 0.55;
     const pivotY = player.y + lerp(1.62, 1.18, player.crouchBlend);
 
