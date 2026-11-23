@@ -13,7 +13,7 @@ export class PlayerController {
 
     this.facingYaw = p.yaw ?? 0;
     this.camYaw = this.facingYaw;
-    this.camPitch = 0.08; // Level horizon gaze in pure First-Person
+    this.camPitch = 0.08;
     this.camDistance = 0;
 
     this.grounded = true;
@@ -35,7 +35,7 @@ export class PlayerController {
     return out;
   }
 
-  update(dt, input) {
+  update(dt, input, colliders = null) {
     this.camYaw -= input.lookX;
     this.camPitch = clamp(this.camPitch + input.lookY, -1.25, 1.25);
     this.facingYaw = this.camYaw;
@@ -55,7 +55,6 @@ export class PlayerController {
     const dirX = wishMag > 0.001 ? wishX / wishMag : 0;
     const dirZ = wishMag > 0.001 ? wishZ / wishMag : 0;
 
-    // Slight natural slowdown when backpedaling or sidestepping in melee
     const backing = input.moveZ > 0.25;
     const canSprint = input.sprint && !input.crouch && !backing && wishMag > 0.25 && this.stamina > 0.06 && this.surface.id !== 'water';
     let baseSpeed = backing ? 3.2 : 4.3;
@@ -90,6 +89,20 @@ export class PlayerController {
     this.x += this.vx * dt;
     this.z += this.vz * dt;
     this.y += this.vy * dt;
+
+    // Solid world collision with smooth wall-sliding (cottages, Torr an Fhaire, dykes, pines, boulders)
+    if (colliders) {
+      const hit = colliders.resolveCircle(this.x, this.z, 0.44, this.y);
+      if (hit.collided) {
+        this.x = hit.x;
+        this.z = hit.z;
+        const inward = this.vx * hit.nx + this.vz * hit.nz;
+        if (inward < 0) {
+          this.vx -= inward * hit.nx;
+          this.vz -= inward * hit.nz;
+        }
+      }
+    }
 
     const nextGroundY = heightAt(this.x, this.z);
     if (nextGroundY < WATER_LEVEL - 1.15) {
