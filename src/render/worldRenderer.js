@@ -22,6 +22,7 @@ import { PainterlyPost } from './painterlyPost.js';
 import { BrambleRig } from './mountMesh.js';
 import { RedcoatRenderer } from './redcoatMesh.js';
 import { CombatFX } from './combatFX.js';
+import { FirstPersonRig } from './fpRig.js';
 
 const CHUNK_SIZE = 120;
 const CHUNK_RADIUS = 4;
@@ -320,44 +321,26 @@ function createGableRoofGeometry(width, depth, ridgeHeight) {
   return geo;
 }
 
-// Studded Highland Oak Targe mesh helper (used on Callum's forearm AND slung on his back)
-function createTargeMesh(oakMat, ironMat, brassMat) {
-  const g = new THREE.Group();
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.045, 16), oakMat);
-  disc.rotation.x = Math.PI / 2;
-  disc.castShadow = true;
-  g.add(disc);
-
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.022, 6, 18), ironMat);
-  g.add(rim);
-
-  const boss = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.11, 8), ironMat);
-  boss.rotation.x = Math.PI / 2;
-  boss.position.z = 0.06;
-  g.add(boss);
-
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    const stud = new THREE.Mesh(new THREE.SphereGeometry(0.018, 5, 5), brassMat);
-    stud.position.set(Math.cos(a) * 0.22, Math.sin(a) * 0.22, 0.026);
-    g.add(stud);
-  }
-  return g;
-}
-
 export class WorldRenderer {
   constructor(canvas, onixField) {
     this.canvas = canvas;
     this.onixField = onixField;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.2, 3200);
+
+    // Pure First-Person & WebXR-ready eye rig (0.06m near plane keeps hands & blades crisp)
+    this.playerRig = new THREE.Group();
+    this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.06, 3200);
+    this.camera.rotation.order = 'YXZ';
+    this.playerRig.add(this.camera);
+    this.scene.add(this.playerRig);
+
     this.renderer = null;
     this.post = null;
+    this.fpRig = null;
     this.chunks = new Map();
     this.flickerLights = [];
     this.smokeParticles = [];
     this.camPos = new THREE.Vector3();
-    this.camLook = new THREE.Vector3();
     this.elapsed = 0;
 
     this.lastFoliageX = 1e9;
@@ -417,7 +400,10 @@ export class WorldRenderer {
     this._buildInstancedTreesAndRocks();
     this._buildStreaming3DFoliage();
     this._buildSmokeAndRain();
-    this._buildCallumMesh();
+
+    // Dedicated Dishonored-style First-Person arms & arsenal attached to camera
+    this.fpRig = new FirstPersonRig(this.plaidMat);
+    this.camera.add(this.fpRig.root);
 
     this.bramble = new BrambleRig(this.plaidMat);
     this.scene.add(this.bramble.root);
@@ -428,7 +414,7 @@ export class WorldRenderer {
   }
 
   getBackendName() {
-    return 'ONIX HDR';
+    return 'ONIX FP HDR';
   }
 
   _setupSkyAndIBL() {
@@ -575,7 +561,6 @@ export class WorldRenderer {
     this.scene.add(this.waterMesh);
   }
 
-  // Grounded 2.6 km Lochaber & Ardgour mountain ring with submerged loch channel (fixes grey water seam!)
   _buildDistantMountains() {
     const segAng = 108;
     const segRad = 22;
@@ -604,7 +589,6 @@ export class WorldRenderer {
 
         let wy;
         if (wx < -220) {
-          // Keep open Loch Linnhe firmly submerged (-14m) until far Ardgour mountains rise on the far western shore
           const ardgourPeak = (macroPeaks * 0.78 + subRidges * 0.5 + 54) * farWestShore;
           wy = -14.0 + ardgourPeak * outerFade;
         } else {
@@ -974,134 +958,6 @@ export class WorldRenderer {
     this.scene.add(this.rainLines);
   }
 
-  _buildCallumMesh() {
-    this.callum = new THREE.Group();
-    this.callum.rotation.order = 'YXZ';
-
-    const woolCoatMat = new THREE.MeshStandardMaterial({ color: 0x2a241d, roughness: 0.92 });
-    const leatherMat = new THREE.MeshStandardMaterial({ color: 0x221710, roughness: 0.76 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xc29372, roughness: 0.78 });
-    const bonnetMat = new THREE.MeshStandardMaterial({ color: 0x1a2634, roughness: 0.94 });
-    const hairMat = new THREE.MeshStandardMaterial({ color: 0x241811, roughness: 0.9 });
-    const ironMat = new THREE.MeshStandardMaterial({ color: 0x626a72, roughness: 0.42, metalness: 0.85 });
-    const brassMat = new THREE.MeshStandardMaterial({ color: 0xc49c48, roughness: 0.35, metalness: 0.85 });
-    const oakMat = new THREE.MeshStandardMaterial({ color: 0x472f1c, roughness: 0.84 });
-    this.swordBladeMat = new THREE.MeshStandardMaterial({ color: 0xc6d0d8, roughness: 0.22, metalness: 0.92 });
-
-    this.callumBody = new THREE.Group();
-    this.callum.add(this.callumBody);
-
-    const legGeo = new THREE.CapsuleGeometry(0.088, 0.62, 5, 8);
-    legGeo.translate(0, -0.36, 0);
-    this.leftLeg = new THREE.Mesh(legGeo, leatherMat);
-    this.leftLeg.position.set(-0.13, 0.82, 0); this.leftLeg.castShadow = true;
-    this.rightLeg = new THREE.Mesh(legGeo, leatherMat);
-    this.rightLeg.position.set(0.13, 0.82, 0); this.rightLeg.castShadow = true;
-    this.callumBody.add(this.leftLeg, this.rightLeg);
-
-    const kilt = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.31, 0.54, 14), this.plaidMat);
-    kilt.position.y = 0.86; kilt.castShadow = true;
-    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.09, 12), leatherMat);
-    belt.position.y = 1.07;
-    const sporran = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.19, 0.08), leatherMat);
-    sporran.position.set(0, 0.92, -0.25);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.32, 6, 10), woolCoatMat);
-    torso.scale.set(1.12, 1.0, 0.72); torso.position.y = 1.34; torso.castShadow = true;
-    const plaidWrap = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.52, 12, 1, false, 0, Math.PI * 1.35), this.plaidMat);
-    plaidWrap.position.set(-0.04, 1.36, 0.02); plaidWrap.rotation.z = -0.34; plaidWrap.castShadow = true;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 12), skinMat);
-    head.position.y = 1.77; head.castShadow = true;
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
-    hair.position.set(0, 1.78, 0.02); hair.rotation.x = 0.35;
-    const bonnet = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.15, 0.09, 12), bonnetMat);
-    bonnet.position.set(0.02, 1.9, 0.0); bonnet.rotation.z = -0.16; bonnet.castShadow = true;
-    this.callumBody.add(kilt, belt, sporran, torso, plaidWrap, head, hair, bonnet);
-
-    // Hip Scabbard & Sheathed Hilt (visible when sword is holstered)
-    const scabbard = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.022, 1.06, 6), leatherMat);
-    scabbard.position.set(-0.29, 0.92, 0.14); scabbard.rotation.x = 0.68; scabbard.rotation.z = 0.16;
-    this.hipSwordHilt = new THREE.Mesh(new THREE.SphereGeometry(0.078, 8, 8), ironMat);
-    this.hipSwordHilt.position.set(-0.24, 1.24, -0.2);
-    this.callumBody.add(scabbard, this.hipSwordHilt);
-
-    // Physical Back Targe (slung squarely across Callum's spine for real rear armor!)
-    this.backTarge = createTargeMesh(oakMat, ironMat, brassMat);
-    this.backTarge.position.set(0, 1.34, 0.25);
-    this.callumBody.add(this.backTarge);
-
-    // Articulated Left & Right Arm Pivots
-    const armGeo = new THREE.CapsuleGeometry(0.072, 0.48, 5, 8);
-    armGeo.translate(0, -0.26, 0);
-
-    this.leftArm = new THREE.Group();
-    this.leftArm.position.set(-0.30, 1.54, 0);
-    const lMesh = new THREE.Mesh(armGeo, woolCoatMat);
-    lMesh.castShadow = true;
-    this.leftArm.add(lMesh);
-
-    // Left Arm Targe (active front shield when Q is toggled)
-    this.armTarge = createTargeMesh(oakMat, ironMat, brassMat);
-    this.armTarge.position.set(-0.08, -0.34, -0.10);
-    this.armTarge.rotation.y = -Math.PI * 0.42;
-    this.leftArm.add(this.armTarge);
-
-    // Short Highland Hunting Bow (mounted in left hand when 'bow' equipped)
-    this.bowGroup = new THREE.Group();
-    this.bowGroup.position.set(0.02, -0.46, -0.12);
-    const bowStave = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.022, 6, 16, Math.PI * 0.85), oakMat);
-    bowStave.rotation.y = Math.PI / 2;
-    bowStave.rotation.z = -Math.PI * 0.42;
-    this.bowArrow = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.78, 5), oakMat);
-    this.bowArrow.rotation.x = Math.PI / 2;
-    this.bowArrow.position.set(0.04, 0, -0.25);
-    this.bowGroup.add(bowStave, this.bowArrow);
-    this.leftArm.add(this.bowGroup);
-
-    this.rightArm = new THREE.Group();
-    this.rightArm.position.set(0.30, 1.54, 0);
-    const rMesh = new THREE.Mesh(armGeo, woolCoatMat);
-    rMesh.castShadow = true;
-    this.rightArm.add(rMesh);
-
-    // Father's Basket-Hilted Broadsword (Primary)
-    this.swordGroup = new THREE.Group();
-    this.swordGroup.position.set(0, -0.48, -0.06);
-    const basket = new THREE.Mesh(new THREE.SphereGeometry(0.082, 8, 8), ironMat);
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.18, 6), leatherMat);
-    grip.rotation.x = Math.PI / 2;
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.012, 0.96), this.swordBladeMat);
-    blade.position.set(0, 0, -0.54); blade.castShadow = true;
-    this.swordGroup.add(basket, grip, blade);
-    this.rightArm.add(this.swordGroup);
-
-    // Belt Dirk / Biodag (Stealth)
-    this.dirkGroup = new THREE.Group();
-    this.dirkGroup.position.set(0, -0.48, -0.05);
-    const dirkGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.020, 0.14, 6), oakMat);
-    dirkGrip.rotation.x = Math.PI / 2;
-    const dirkBlade = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.38, 4), this.swordBladeMat);
-    dirkBlade.rotation.x = -Math.PI / 2;
-    dirkBlade.position.set(0, 0, -0.24);
-    this.dirkGroup.add(dirkGrip, dirkBlade);
-    this.rightArm.add(this.dirkGroup);
-
-    // Single-Shot All-Metal Highland Flintlock Pistol
-    this.flintlockGroup = new THREE.Group();
-    this.flintlockGroup.position.set(0, -0.46, -0.06);
-    const pStock = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.055, 0.24), ironMat);
-    pStock.position.set(0, -0.02, -0.08);
-    const pBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.34, 6), ironMat);
-    pBarrel.rotation.x = Math.PI / 2;
-    pBarrel.position.set(0, 0.015, -0.22);
-    const pBrass = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 6), brassMat);
-    pBrass.position.set(0, -0.05, 0.04);
-    this.flintlockGroup.add(pStock, pBarrel, pBrass);
-    this.rightArm.add(this.flintlockGroup);
-
-    this.callumBody.add(this.leftArm, this.rightArm);
-    this.scene.add(this.callum);
-  }
-
   _buildChunk(cx, cz, highDetail) {
     const segs = highDetail ? 48 : 16;
     const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
@@ -1208,7 +1064,9 @@ export class WorldRenderer {
         const oi = i * 3;
         off[oi + 1] -= 24.0 * dt;
         if (off[oi + 1] < -2) off[oi + 1] += 22;
-        const rx = this.camera.position.x + off[oi], ry = this.camera.position.y - 6 + off[oi + 1], rz = this.camera.position.z + off[oi + 2];
+        const rx = this.camPos.x + off[oi];
+        const ry = this.camPos.y - 6 + off[oi + 1];
+        const rz = this.camPos.z + off[oi + 2];
         const pi = i * 6;
         pos[pi] = rx; pos[pi + 1] = ry; pos[pi + 2] = rz;
         pos[pi + 3] = rx + slantX; pos[pi + 4] = ry - 0.85; pos[pi + 5] = rz + slantZ;
@@ -1233,164 +1091,76 @@ export class WorldRenderer {
     }
   }
 
-  _updateCallumWeaponsAndPose(player, mount, combat) {
-    // Toggle visible personal weapons & physical targe position (Left Arm <-> Back Spine Armor)
-    this.swordGroup.visible = combat.weapon === 'sword';
-    this.hipSwordHilt.visible = combat.weapon !== 'sword';
-    this.dirkGroup.visible = combat.weapon === 'dirk';
-    this.flintlockGroup.visible = combat.weapon === 'flintlock';
-    this.bowGroup.visible = combat.weapon === 'bow';
-    this.bowArrow.visible = combat.weapon === 'bow' && combat.arrowCount > 0;
-    this.armTarge.visible = combat.targeOnArm;
-    this.backTarge.visible = !combat.targeOnArm;
-
-    // Persistent blood staining on Father's Broadsword & Dirk steel
-    this.swordBladeMat.color.setHex(0xc6d0d8).lerp(this.tmpColor.setHex(0x520505), combat.bladeBlood * 0.88);
-
-    // Base locomotion pose (mounted vs on foot)
-    if (mount.mounted) {
-      const horseBob = this.bramble.bodyGroup.position.y;
-      const leanFwd = clamp(mount.speed / 14.0, 0, 1) * 0.24;
-      this.callum.position.set(mount.x, mount.y + 0.86 + horseBob, mount.z);
-      this.callum.rotation.set(mount.pitch * 0.55, mount.yaw, -mount.roll * 0.55);
-      this.callumBody.position.y = 0;
-      this.callumBody.rotation.set(-leanFwd, 0, 0);
-      this.leftLeg.rotation.set(0.32, 0, 0.34);
-      this.rightLeg.rotation.set(0.32, 0, -0.34);
-      const reinBob = Math.sin(mount.stridePhase) * 0.08 * clamp(mount.speed / 10, 0, 1);
-      this.leftArm.rotation.set(0.72 + reinBob, 0, -0.14);
-      this.rightArm.rotation.set(0.72 + reinBob, 0, 0.14);
-    } else {
-      this.callum.position.set(player.x, player.y, player.z);
-      this.callum.rotation.set(0, player.facingYaw, 0);
-      const strideAmp = clamp(player.speed / 5.0, 0, 1);
-      const swing = Math.sin(player.stridePhase) * 0.55 * strideAmp;
-      this.leftLeg.rotation.set(swing, 0, 0);
-      this.rightLeg.rotation.set(-swing, 0, 0);
-      this.leftArm.rotation.set(-swing * 0.75, 0, 0);
-      this.rightArm.rotation.set(swing * 0.75, 0, 0);
-      this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
-      this.callumBody.rotation.set(player.crouchBlend * 0.28 + strideAmp * 0.06, 0, 0);
-    }
-
-    // Combat upper-body pose overlays (swings, heavy cleave, parry guard, shield bash, bow draw, flintlock)
-    if (combat.attackState !== 'NONE') {
-      const p = clamp(combat.attackTimer / combat.attackDuration, 0, 1);
-      if (combat.attackState === 'BASH') {
-        const thrust = Math.sin(p * Math.PI);
-        this.leftArm.rotation.set(1.45, -0.35 + thrust * 0.5, 0.2);
-        this.callumBody.rotation.y = -thrust * 0.45;
-      } else if (combat.attackKind === 'heavy_cleave') {
-        const arc = p < 0.34 ? lerp(0.8, 2.75, p / 0.34) : lerp(2.75, 0.25, (p - 0.34) / 0.66);
-        this.rightArm.rotation.set(arc, 0.15, -0.22);
-        this.callumBody.rotation.y = p < 0.34 ? -0.35 : 0.42;
-      } else if (combat.attackKind === 'fast_left') {
-        const sweep = lerp(-1.1, 1.3, p);
-        this.rightArm.rotation.set(1.35, sweep, -0.45);
-        this.callumBody.rotation.y = sweep * 0.35;
-      } else if (combat.attackKind === 'fast_right') {
-        const sweep = lerp(1.2, -1.1, p);
-        this.rightArm.rotation.set(1.35, sweep, 0.45);
-        this.callumBody.rotation.y = sweep * 0.35;
-      } else {
-        // Thrust / Dirk Slash / Stealth Takedown
-        const lunge = Math.sin(p * Math.PI);
-        this.rightArm.rotation.set(1.42 + lunge * 0.35, -0.15, 0);
-        this.callumBody.rotation.x += lunge * 0.22;
-      }
-    } else if (combat.guarding) {
-      if (combat.targeOnArm) {
-        this.leftArm.rotation.set(1.35, -0.58, 0.22);
-        this.rightArm.rotation.set(1.05, 0.28, -0.22);
-      } else {
-        this.rightArm.rotation.set(1.32, 0.68, -0.52);
-        this.leftArm.rotation.set(0.95, -0.32, 0.22);
-      }
-    } else if (combat.weapon === 'bow' && combat.bowDrawing) {
-      this.leftArm.rotation.set(1.52, -0.12, 0);
-      this.rightArm.rotation.set(1.46, 0.38 + combat.bowDraw * 0.45, -0.15);
-      this.bowArrow.position.z = -0.25 + combat.bowDraw * 0.22;
-      this.callumBody.rotation.y = -0.55;
-    } else if (combat.weapon === 'flintlock') {
-      if (combat.flintlockReloadTimer > 0) {
-        const ram = Math.sin(this.elapsed * 8.0) * 0.16;
-        this.rightArm.rotation.set(0.95 + ram, 0.32, 0);
-        this.leftArm.rotation.set(0.98, -0.32, 0);
-      } else {
-        this.rightArm.rotation.set(1.48, 0.08, 0);
-      }
-    } else if (combat.wipeTimer > 0) {
-      const w = Math.sin(this.elapsed * 14.0) * 0.35;
-      this.rightArm.rotation.set(1.15, 0.5 + w, -0.2);
-      this.leftArm.rotation.set(1.15, -0.4 - w, 0.2);
-    } else if (combat.weapon === 'sword' && !mount.mounted) {
-      // Relaxed ready carry for Father's Broadsword
-      this.rightArm.rotation.x += 0.35;
-    }
-  }
-
   update(dt, player, mount, combat, redcoats, worldState) {
     this.elapsed += dt;
     this.sharedUniforms.uTime.value = this.elapsed;
 
     this._updateTerrainChunks(player.x, player.z);
     this._updateStreamingFoliage(player.x, player.z, player.camYaw);
-    this._updateAtmosphere(dt, worldState, player.x, player.z);
-    this._updateSmoke(dt);
-
-    this.waterMesh.position.x = Math.round(player.x / 50) * 50;
-    this.waterMesh.position.z = Math.round(player.z / 50) * 50;
-
     this.bramble.update(mount, this.elapsed);
-    this._updateCallumWeaponsAndPose(player, mount, combat);
-    this.redcoatRenderer.sync(redcoats, this.elapsed);
-    this.combatFX.update(dt, combat, this.onixField);
-    this.post?.setDamageFlash(combat.damageFlash);
 
-    // Dynamic camera: pulls back at gallop, tightens smoothly over shoulder when drawing bow or aiming flintlock
+    // Compute exact First-Person eye position (on-foot stride bob OR horizon-stabilized saddle height)
     const isAiming = (combat.weapon === 'bow' && combat.bowDrawing) || (combat.weapon === 'flintlock' && combat.flintlockReloadTimer <= 0);
+    let targetX = player.x;
+    let targetZ = player.z;
+    let targetY;
+    let horizonRoll = 0;
+
+    if (mount.mounted) {
+      // Seat eyes squarely over Bramble's saddle looking out over his arched neck & ears
+      const saddleBack = 0.06;
+      targetX = mount.x + Math.sin(mount.yaw) * saddleBack;
+      targetZ = mount.z + Math.cos(mount.yaw) * saddleBack;
+      const horseBob = this.bramble.bodyGroup.position.y * (isAiming ? 0.18 : 0.44);
+      targetY = mount.y + 2.38 + horseBob;
+      horizonRoll = -mount.roll * 0.20;
+    } else {
+      const moveAmp = clamp(player.speed / 6.5, 0, 1) * (isAiming ? 0.25 : 1.0);
+      const stepBob = Math.abs(Math.sin(player.stridePhase)) * 0.042 * moveAmp;
+      targetY = player.y + lerp(1.68, 1.02, player.crouchBlend) + stepBob;
+    }
+
+    if (this.camPos.lengthSq() === 0) {
+      this.camPos.set(targetX, targetY, targetZ);
+    } else {
+      // Zero-lag horizontal tracking + silky vertical terrain/saddle stabilization
+      this.camPos.x = targetX;
+      this.camPos.z = targetZ;
+      this.camPos.y = lerp(this.camPos.y, targetY, 1 - Math.exp(-18 * dt));
+    }
+
+    this.playerRig.position.copy(this.camPos);
+
+    // Dynamic First-Person FOV: 68° base for wide melee awareness, 50° focused aim, 74° gallop rush
     const speedNorm = mount.mounted ? clamp(mount.speed / 14.0, 0, 1) : 0;
-    const targetFov = isAiming ? 44 : mount.mounted ? lerp(56, 63, speedNorm) : 54;
+    const targetFov = isAiming ? 50 : mount.mounted ? lerp(68, 74, speedNorm) : 68;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = lerp(this.camera.fov, targetFov, 1 - Math.exp(-7 * dt));
+      this.camera.fov = lerp(this.camera.fov, targetFov, 1 - Math.exp(-8 * dt));
       this.camera.updateProjectionMatrix();
     }
 
-    const shoulderRight = isAiming ? 0.68 : mount.mounted ? 0.65 : 0.55;
-    const activeDist = isAiming
-      ? (mount.mounted ? 4.4 : 3.2)
-      : mount.mounted
-        ? player.camDistance + 1.55 + speedNorm * 0.9
-        : player.camDistance;
-    const pivotY = mount.mounted ? mount.y + 2.25 : player.y + lerp(1.62, 1.18, player.crouchBlend);
+    // Apply exact eye orientation + tactical combat impact shake (parries, back-targe jolts, flintlock recoil)
+    const shake = combat.screenShake;
+    const shakeX = (Math.random() - 0.5) * shake * 0.05;
+    const shakeY = (Math.random() - 0.5) * shake * 0.05;
+    const shakeRoll = (Math.random() - 0.5) * shake * 0.045;
 
-    const cosP = Math.cos(player.camPitch), sinP = Math.sin(player.camPitch);
-    const sinY = Math.sin(player.camYaw), cosY = Math.cos(player.camYaw);
+    this.camera.position.set(shakeX, shakeY, 0);
+    this.camera.rotation.set(-player.camPitch, player.camYaw, horizonRoll + shakeRoll);
 
-    const desiredX = player.x + sinY * cosP * activeDist + cosY * shoulderRight;
-    const desiredZ = player.z + cosY * cosP * activeDist - sinY * shoulderRight;
-    let desiredY = pivotY + sinP * activeDist;
-    const camTerrainY = heightAt(desiredX, desiredZ) + 0.65;
-    if (desiredY < camTerrainY) desiredY = camTerrainY;
+    // Update Dishonored-style First-Person arms & weapons
+    this.fpRig.update(dt, player, mount, combat, this.elapsed);
 
-    const camAlpha = 1 - Math.exp(-(mount.mounted ? 11 : 14) * dt);
-    if (this.camPos.lengthSq() === 0) {
-      this.camPos.set(desiredX, desiredY, desiredZ);
-      this.camLook.set(player.x, pivotY, player.z);
-    } else {
-      this.camPos.lerp(new THREE.Vector3(desiredX, desiredY, desiredZ), camAlpha);
-      this.camLook.lerp(new THREE.Vector3(player.x + cosY * 0.35, pivotY, player.z - sinY * 0.35), camAlpha);
-    }
+    // Update atmosphere, sky, water, smoke, Redcoats & gore FX around live eye position
+    this._updateAtmosphere(dt, worldState, player.x, player.z);
+    this._updateSmoke(dt);
+    this.skyDome.position.copy(this.camPos);
+    this.waterMesh.position.x = Math.round(player.x / 50) * 50;
+    this.waterMesh.position.z = Math.round(player.z / 50) * 50;
 
-    // Apply tactical impact camera shake (parries, flintlock blasts, cleaves) without drifting camPos
-    const shake = combat.screenShake * 0.16;
-    this.camera.position.set(
-      this.camPos.x + (Math.random() - 0.5) * shake,
-      this.camPos.y + (Math.random() - 0.5) * shake,
-      this.camPos.z + (Math.random() - 0.5) * shake
-    );
-    this.camera.lookAt(this.camLook);
-    this.skyDome.position.copy(this.camera.position);
+    this.redcoatRenderer.sync(redcoats, this.elapsed);
+    this.combatFX.update(dt, combat, this.onixField);
+    this.post?.setDamageFlash(combat.damageFlash);
   }
 
   render() {
