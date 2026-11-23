@@ -5,6 +5,7 @@ export class InputManager {
     this.canvas = canvas;
     this.keys = new Set();
     this.pointerLocked = false;
+    this.mouseDragging = false;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.wheelDelta = 0;
@@ -30,6 +31,15 @@ export class InputManager {
     this._bindTouch();
   }
 
+  clearTransient() {
+    this.pauseQueued = false;
+    this.interactQueued = false;
+    this.jumpQueued = false;
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+    this.wheelDelta = 0;
+  }
+
   _bindKeyboardMouse() {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape') {
@@ -52,23 +62,35 @@ export class InputManager {
 
     window.addEventListener('blur', () => {
       this.keys.clear();
+      this.mouseDragging = false;
     });
 
     document.addEventListener('pointerlockchange', () => {
+      const wasLocked = this.pointerLocked;
       this.pointerLocked = document.pointerLockElement === this.canvas;
-      if (!this.pointerLocked) {
+      if (wasLocked && !this.pointerLocked) {
         this.pauseQueued = true;
       }
     });
 
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDragging = true;
+        if (!this.pointerLocked) this.requestPointerLock();
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      this.mouseDragging = false;
+    });
+
     window.addEventListener('mousemove', (e) => {
-      if (!this.pointerLocked) return;
+      if (!this.pointerLocked && !this.mouseDragging) return;
       this.mouseDeltaX += e.movementX;
       this.mouseDeltaY += e.movementY;
     });
 
     window.addEventListener('wheel', (e) => {
-      if (!this.pointerLocked) return;
       this.wheelDelta += Math.sign(e.deltaY);
     }, { passive: true });
   }
@@ -165,9 +187,10 @@ export class InputManager {
   requestPointerLock() {
     if (this.canvas.requestPointerLock) {
       try {
-        this.canvas.requestPointerLock();
+        const res = this.canvas.requestPointerLock();
+        if (res && typeof res.catch === 'function') res.catch(() => {});
       } catch (_) {
-        // Mobile or sandbox fallback
+        // Click-and-drag fallback remains active
       }
     }
   }
@@ -199,7 +222,6 @@ export class InputManager {
     if (this.keys.has('BracketLeft')) timeDelta -= 2.5 * dt;
     if (this.keys.has('BracketRight')) timeDelta += 2.5 * dt;
 
-    // Native Bluetooth Xbox / PlayStation Gamepad API
     let gamepadConnected = false;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = pads.find((p) => p && p.connected);
@@ -219,7 +241,6 @@ export class InputManager {
       lookX += rx * 2.4 * dt;
       lookY += ry * 1.8 * dt;
 
-      // A (0) or L3 (10) = Sprint; B (1) or R3 (11) = Crouch; Y (3) = Jump; X (2) = Interact; Start (9) = Pause
       if (pad.buttons[0]?.pressed || pad.buttons[10]?.pressed) sprint = true;
 
       const crouchBtn = Boolean(pad.buttons[1]?.pressed || pad.buttons[11]?.pressed);
