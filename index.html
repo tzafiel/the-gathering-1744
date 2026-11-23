@@ -10,10 +10,8 @@
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js",
-      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js",
-      "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
     }
   }
   </script>
@@ -62,7 +60,7 @@
 
       <div class="controls-grid">
         <div><strong>Move</strong><span>WASD / Left Stick</span></div>
-        <div><strong>Look</strong><span>Mouse / Right Stick</span></div>
+        <div><strong>Look</strong><span>Mouse (or Drag) / R-Stick</span></div>
         <div><strong>Sprint</strong><span>Shift / L3 or A</span></div>
         <div><strong>Crouch</strong><span>C or Ctrl / B</span></div>
         <div><strong>Jump</strong><span>Space / Y</span></div>
@@ -81,14 +79,14 @@
         <input id="file-import" type="file" accept="application/json" class="hidden" />
       </div>
 
-      <div id="overlay-status">Offline PWA Ready · Local Save Active</div>
+      <div id="overlay-status">Loading engine modules...</div>
     </div>
   </div>
 
   <!-- Error Fallback Banner -->
   <div id="error-banner" class="hidden"></div>
 
-  <!-- Touch Controls (shown only on touch devices) -->
+  <!-- Touch Controls -->
   <div id="touch-controls" class="hidden">
     <div id="touch-left-pad"><div id="touch-knob"></div></div>
     <div id="touch-actions">
@@ -97,6 +95,29 @@
       <button id="touch-jump">JUMP</button>
     </div>
   </div>
+
+  <!-- Boot diagnostics so module/path errors are always visible on-screen -->
+  <script>
+    (function () {
+      const showErr = (msg) => {
+        const el = document.getElementById('error-banner');
+        if (!el) return;
+        el.textContent = msg;
+        el.classList.remove('hidden');
+      };
+      window.addEventListener('error', (e) => {
+        showErr(`Runtime Error: ${e.message || 'Module failed to load (open F12 Console for file path).'}`);
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        showErr(`Async Error: ${e.reason?.message || e.reason || 'Promise rejected'}`);
+      });
+      setTimeout(() => {
+        if (!window.__GATHERING_BOOTED) {
+          showErr('Engine module did not start. Press F12 -> Console to check for a 404 filename mismatch (case-sensitive: worldState.js, worldRenderer.js).');
+        }
+      }, 4500);
+    })();
+  </script>
 
   <script type="module" src="./src/main.js"></script>
 </body>
