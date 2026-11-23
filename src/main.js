@@ -102,7 +102,10 @@ function boot() {
     worldState = createDefaultWorldState();
     saveWorldState(worldState);
     player = new PlayerController(worldState);
-    overlayStatus.textContent = 'World reset to Summer 1744 defaults.';
+    renderer.camPos.set(0, 0, 0);
+    renderer.update(FIXED_DT, player, worldState);
+    renderer.render();
+    overlayStatus.textContent = 'World reset to Golden Dusk 1744 ridge vantage.';
   });
 
   window.addEventListener('resize', () => renderer.resize());
@@ -160,6 +163,10 @@ function boot() {
       };
     }
 
+    if (frameInput.oilToggle) {
+      renderer.toggleOilMode();
+    }
+
     const wState = worldState.weather?.state || 'clear';
     const rainIntensity = wState === 'rain' ? 1.0 : 0.0;
     const windStrength = wState === 'rain' ? 1.65 : wState === 'mist' ? 0.65 : 1.05;
@@ -172,7 +179,6 @@ function boot() {
       worldState.timeOfDay += 24;
     }
 
-    // Fixed 60Hz deterministic simulation: Callum kinematics + ONIX lattice + symplectic water wakes
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
       player.update(FIXED_DT, frameInput);
