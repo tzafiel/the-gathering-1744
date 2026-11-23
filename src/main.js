@@ -12,7 +12,9 @@ import { WorldRenderer } from './render/worldRenderer.js';
 
 const FIXED_DT = 1 / 60;
 
-async function boot() {
+function boot() {
+  window.__GATHERING_BOOTED = true;
+
   const canvas = document.getElementById('game-canvas');
   const overlay = document.getElementById('overlay');
   const overlayStatus = document.getElementById('overlay-status');
@@ -37,7 +39,7 @@ async function boot() {
   const renderer = new WorldRenderer(canvas);
 
   try {
-    await renderer.init();
+    renderer.init();
   } catch (err) {
     errorBanner.textContent = `Renderer failed to initialize: ${err.message}`;
     errorBanner.classList.remove('hidden');
@@ -55,7 +57,9 @@ async function boot() {
     paused = next;
     overlay.classList.toggle('hidden', !paused);
     if (isTouch) touchControls.classList.toggle('hidden', paused);
-    if (paused) {
+    if (!paused) {
+      input.clearTransient();
+    } else {
       player.syncToWorldState(worldState);
       saveWorldState(worldState);
       overlayStatus.textContent = `Saved locally · ${renderer.getBackendName()} · Day ${worldState.dayCount}`;
@@ -97,7 +101,6 @@ async function boot() {
 
   window.addEventListener('resize', () => renderer.resize());
 
-  // Register offline Service Worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
@@ -118,9 +121,12 @@ async function boot() {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} · DAY ${worldState.dayCount} · 1744`;
   }
 
-  // Initial render behind title screen so the 1744 glen greets you immediately
+  overlayStatus.textContent = `Ready · ${renderer.getBackendName()} · Day ${worldState.dayCount}`;
+
+  // Initial render behind title screen
   renderer.update(FIXED_DT, player, worldState);
   renderer.render();
+  telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m`;
 
   let lastTime = performance.now();
   let accumulator = 0;
@@ -141,7 +147,6 @@ async function boot() {
       return;
     }
 
-    // Gentle real-time celestial progression (~24 real minutes per game day) + manual [ ] scrub
     worldState.timeOfDay += frameDt * (24 / 1440) + frameInput.timeDelta;
     if (worldState.timeOfDay >= 24) {
       worldState.timeOfDay -= 24;
@@ -150,14 +155,12 @@ async function boot() {
       worldState.timeOfDay += 24;
     }
 
-    // Fixed 60Hz deterministic simulation loop
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
       player.update(FIXED_DT, frameInput);
       accumulator -= FIXED_DT;
     }
 
-    // Proximity check for hidden cairn stash
     const cairn = worldState.cairns[0];
     const dCairn = Math.hypot(player.x - LANDMARKS.stashCairn.x, player.z - LANDMARKS.stashCairn.z);
     if (dCairn < 4.0) {
@@ -174,11 +177,9 @@ async function boot() {
       interactPrompt.classList.add('hidden');
     }
 
-    // Render interpolated frame
     renderer.update(frameDt, player, worldState);
     renderer.render();
 
-    // Update minimal diegetic HUD
     staminaFill.style.width = `${Math.round(player.stamina * 100)}%`;
     stancePill.textContent = player.stance;
     surfacePill.textContent = player.surface.label;
@@ -187,7 +188,6 @@ async function boot() {
     compassTape.textContent = formatCompass(player.camYaw);
     telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m${frameInput.gamepadConnected ? ' · PAD' : ''}`;
 
-    // Region arrival banner
     const reg = getRegionName(player.x, player.z);
     if (reg.title !== lastRegionKey) {
       lastRegionKey = reg.title;
@@ -200,7 +200,6 @@ async function boot() {
       if (bannerTimer <= 0) regionBanner.classList.remove('visible');
     }
 
-    // Background autosave every 15 seconds
     autoSaveTimer += frameDt;
     if (autoSaveTimer >= 15) {
       autoSaveTimer = 0;
