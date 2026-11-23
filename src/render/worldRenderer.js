@@ -19,11 +19,11 @@ import {
   createOnixPlaidMaterial
 } from './onixShaders.js';
 import { PainterlyPost } from './painterlyPost.js';
+import { BrambleRig } from './mountMesh.js';
 
 const CHUNK_SIZE = 120;
 const CHUNK_RADIUS = 4;
 
-// Camera-forward lush ground flora streaming (shifts ahead of gaze + smooth height-sink out to 90m)
 const FOLIAGE_STEP = 1.45;
 const FOLIAGE_HALF_GRID = 40;
 const MAX_GRASS = 4200;
@@ -60,7 +60,6 @@ function mergeNonIndexedGeos(geos) {
   return out;
 }
 
-// Painterly Scots Pine bough texture: full feathery needle fans with natural sky gaps
 function createPainterlyPineBoughTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
@@ -90,7 +89,6 @@ function createPainterlyPineBoughTexture(aniso = 8) {
     ctx.stroke();
   }
 
-  // Rich layered needle brush clusters (deep shadow undersides -> sunlit olive-gold crown needles)
   for (let c = 0; c < 22; c++) {
     const ang = rng() * Math.PI * 2;
     const dist = Math.pow(rng(), 0.68) * 82;
@@ -121,7 +119,6 @@ function createPainterlyPineBoughTexture(aniso = 8) {
   return tex;
 }
 
-// Soft painterly Highland sedge & wild moor grass fan (replaces harsh dark polygonal spikes!)
 function createPainterlyGrassTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
@@ -143,7 +140,7 @@ function createPainterlyGrassTexture(aniso = 8) {
 
     const isGolden = rng() > 0.42;
     const grad = ctx.createLinearGradient(sx, size, ex, ey);
-    grad.addColorStop(0, '#364622'); // Warm terrain-matched moss base (zero black spikes!)
+    grad.addColorStop(0, '#364622');
     grad.addColorStop(0.52, isGolden ? '#6c682e' : '#4a622a');
     grad.addColorStop(1, isGolden ? '#b09248' : '#7b8d42');
 
@@ -162,7 +159,6 @@ function createPainterlyGrassTexture(aniso = 8) {
   return tex;
 }
 
-// Lush painterly Highland bell-heather shrub texture (thick plum, magenta-wine & moss sprigs)
 function createPainterlyHeatherSprigTexture(aniso = 8) {
   const size = 256;
   const canvas = document.createElement('canvas');
@@ -233,14 +229,12 @@ function createPainterlyHeatherSprigTexture(aniso = 8) {
   return tex;
 }
 
-// Soft crossed curved bush/sedge fan with transferred upward spherical normals
 function createFeatheredTuftGeometry(width, height, cardCount = 3) {
   const planes = [];
   for (let c = 0; c < cardCount; c++) {
     const g = new THREE.PlaneGeometry(width, height, 2, 2);
     g.translate(0, height * 0.45, 0);
 
-    // Subtle natural outward arch
     const pos = g.attributes.position;
     const norm = g.attributes.normal;
     const cols = new Float32Array(pos.count * 3);
@@ -250,7 +244,7 @@ function createFeatheredTuftGeometry(width, height, cardCount = 3) {
     }
 
     g.rotateX(c === cardCount - 1 ? 0.34 : (c % 2 === 0 ? 0.14 : -0.14));
-    g.rotateY((c / cardCount) * Math.PI + (c * 0.18));
+    g.rotateY((c / cardCount) * Math.PI + c * 0.18);
 
     for (let i = 0; i < pos.count; i++) {
       const px = pos.getX(i);
@@ -274,7 +268,6 @@ function createFeatheredTuftGeometry(width, height, cardCount = 3) {
   return mergeNonIndexedGeos(planes);
 }
 
-// Majestic windswept Caledonian Scots Pine skeleton with broad layered umbrella boughs
 const PINE_BRANCH_TIPS = [
   { x: 2.55, y: 5.5, z: 0.70, r: 3.1 },
   { x: -2.25, y: 6.0, z: 1.85, r: 3.0 },
@@ -320,7 +313,6 @@ function createScotsPineWoodGeometry() {
   return mergeNonIndexedGeos(parts);
 }
 
-// Full-crowned painterly Scots Pine canopy with transferred spherical lighting
 function createScotsPineCanopyFeatheredGeometry() {
   const rng = mulberry32(61744);
   const cards = [];
@@ -425,7 +417,7 @@ export class WorldRenderer {
   init() {
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: false, // Handled cleanly inside PainterlyPost HDR pipeline
+      antialias: false,
       powerPreference: 'high-performance'
     });
 
@@ -433,7 +425,6 @@ export class WorldRenderer {
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // Output pure Linear HDR into PainterlyPost so Turner Bloom + ACES + Kuwahara run once without double-gamma
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     this.scene.fog = new THREE.FogExp2(0x7c8f9e, 0.00095);
@@ -463,6 +454,9 @@ export class WorldRenderer {
     this._buildSmokeAndRain();
     this._buildCallumMesh();
 
+    this.bramble = new BrambleRig(this.plaidMat);
+    this.scene.add(this.bramble.root);
+
     this.post = new PainterlyPost(this.renderer);
   }
 
@@ -483,7 +477,6 @@ export class WorldRenderer {
       uStormFactor: { value: 0.28 }
     };
 
-    // Pure Linear HDR J.M.W. Turner Atlantic Sky Dome (feeds golden sunbreaks straight into HDR Bloom!)
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -503,28 +496,14 @@ export class WorldRenderer {
         uniform float uStormFactor;
         varying vec3 vWorldDir;
 
-        float hash(vec2 p) {
-          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-        }
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float noise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(
-            mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
-            f.y
-          );
+          vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
         }
         float fbm(vec2 p) {
-          float v = 0.0;
-          float a = 0.5;
-          mat2 r = mat2(0.8, 0.6, -0.6, 0.8);
-          for (int i = 0; i < 5; i++) {
-            v += a * noise(p);
-            p = r * p * 2.04 + vec2(3.1, 7.4);
-            a *= 0.5;
-          }
+          float v = 0.0; float a = 0.5; mat2 r = mat2(0.8, 0.6, -0.6, 0.8);
+          for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.04 + vec2(3.1, 7.4); a *= 0.5; }
           return v;
         }
 
@@ -534,7 +513,6 @@ export class WorldRenderer {
 
           vec3 nightZen = vec3(0.005, 0.011, 0.028);
           vec3 nightHor = vec3(0.018, 0.032, 0.060);
-
           vec3 dayZen = mix(vec3(0.048, 0.130, 0.285), vec3(0.060, 0.075, 0.105), uStormFactor);
           vec3 dayHor = mix(vec3(0.32, 0.42, 0.48), vec3(0.16, 0.19, 0.22), uStormFactor);
           vec3 goldHor = vec3(1.18, 0.56, 0.18);
@@ -542,34 +520,28 @@ export class WorldRenderer {
           vec3 zenith = mix(nightZen, dayZen, uDayFactor);
           vec3 horizon = mix(nightHor, dayHor, uDayFactor);
           horizon = mix(horizon, goldHor, uGoldenFactor * 0.78 * (1.0 - uStormFactor * 0.62));
-
           vec3 col = mix(horizon, zenith, pow(h, 0.52));
 
-          // Radiant HDR Turner sunbreak halo -> drives cinematic bloom across the horizon & storm clouds
           float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
           vec3 sunTint = mix(vec3(1.4, 0.64, 0.20), vec3(1.3, 1.05, 0.74), uDayFactor);
           float sunVis = (1.0 - uStormFactor * 0.75) * uDayFactor;
           col += sunTint * pow(sunDot, 5.0) * 0.62 * sunVis;
           col += sunTint * smoothstep(0.9965, 0.9993, sunDot) * 4.5 * sunVis;
 
-          // Towering billowing Romantic storm clouds with glowing sunlit rims & dark charcoal bellies
           if (dir.y > 0.004) {
-            vec2 uv = dir.xz / (dir.y + 0.14) * 1.08;
-            uv += vec2(uTime * 0.010, uTime * 0.004);
+            vec2 uv = dir.xz / (dir.y + 0.14) * 1.08 + vec2(uTime * 0.010, uTime * 0.004);
             vec2 warp = vec2(fbm(uv * 0.75 + 1.4), fbm(uv * 0.75 + 5.2)) - 0.5;
             float c1 = fbm(uv + warp * 0.92);
             float c2 = fbm(uv * 2.2 - vec2(uTime * 0.005, 0.0) + warp * 0.45);
             float cover = mix(0.40, 0.18, uStormFactor);
-            float mask = smoothstep(cover, cover + 0.34, c1 * 0.68 + c2 * 0.32);
-            mask *= smoothstep(0.004, 0.16, dir.y);
+            float mask = smoothstep(cover, cover + 0.34, c1 * 0.68 + c2 * 0.32) * smoothstep(0.004, 0.16, dir.y);
 
             vec3 cLit = mix(vec3(0.04, 0.06, 0.09), vec3(0.92, 0.88, 0.80), uDayFactor);
             cLit = mix(cLit, vec3(1.55, 0.92, 0.40), clamp(uGoldenFactor * 0.88 + pow(sunDot, 3.0) * 0.7, 0.0, 1.0) * (1.0 - uStormFactor * 0.55));
             vec3 cDark = mix(vec3(0.014, 0.020, 0.036), mix(vec3(0.08, 0.10, 0.15), vec3(0.045, 0.060, 0.085), uStormFactor), uDayFactor);
 
             float rim = clamp(c2 * 1.12 + pow(sunDot, 3.5) * 1.05 * sunVis, 0.0, 1.0);
-            vec3 cloudCol = mix(cDark, cLit, rim);
-            col = mix(col, cloudCol, mask * mix(0.90, 0.97, uStormFactor));
+            col = mix(col, mix(cDark, cLit, rim), mask * mix(0.90, 0.97, uStormFactor));
           }
 
           if (uDayFactor < 0.3 && dir.y > 0.08) {
@@ -577,7 +549,6 @@ export class WorldRenderer {
             col += vec3(0.85, 0.92, 1.1) * star * (1.0 - uDayFactor * 3.2) * (1.0 - uStormFactor);
           }
 
-          // Output raw linear HDR directly to PainterlyPost
           gl_FragColor = vec4(col, 1.0);
         }
       `
@@ -642,7 +613,6 @@ export class WorldRenderer {
     this.scene.add(this.waterMesh);
   }
 
-  // FIXED Winding Order (+Y Upward Front Faces!): Grounded 2.6 km Lochaber & Ardgour Munro Mountain Ring
   _buildDistantMountains() {
     const segAng = 108;
     const segRad = 22;
@@ -665,23 +635,18 @@ export class WorldRenderer {
         const outerFade = smoothstep(0.02, 0.55, t);
         const seamTuck = ir === 0 ? -1.8 : 0.0;
 
-        // Sea-loch channel sits naturally between x = -180 and x = -850, then Ardgour hills rise cleanly OUT of the water
         const farWestShore = smoothstep(-740, -1280, wx);
         const macroPeaks = ridgeNoise2D(wx * 0.00085, wz * 0.00085, 4, 2744) * 320;
         const subRidges = fbm2D(wx * 0.0022, wz * 0.0022, 3, 3744) * 62;
 
         let wy;
         if (wx < -220) {
-          // Smooth submerged seabed in the loch rising organically into distant coastal mountains across the water
-          const seaBed = -12.0;
           const ardgourPeak = (macroPeaks * 0.78 + subRidges * 0.5 + 48) * farWestShore;
-          wy = lerp(baseH, seaBed + ardgourPeak, outerFade) + seamTuck;
+          wy = lerp(baseH, -12.0 + ardgourPeak, outerFade) + seamTuck;
         } else {
-          // Towering Ben Nevis & Great Glen Munros framing North, East, and South
           const eastBoost = lerp(0.72, 1.20, smoothstep(-220, 950, wx));
           wy = baseH + (macroPeaks * eastBoost + subRidges + 32) * outerFade + seamTuck;
         }
-
         verts.push(wx, wy, wz);
       }
     }
@@ -693,7 +658,6 @@ export class WorldRenderer {
         const b = a + 1;
         const c = (ir + 1) * row + ia;
         const d = c + 1;
-        // Correct CCW upward-facing triangle winding (ab x ac = +Y) so mountains are solid, never inside-out!
         indices.push(a, b, c, b, d, c);
       }
     }
@@ -709,15 +673,8 @@ export class WorldRenderer {
   }
 
   _buildSector01Landmarks() {
-    // HDR glowing ember & candle materials -> radiate warm Turner oil-paint bloom halos!
-    const emberMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(3.6, 1.35, 0.24),
-      toneMapped: false
-    });
-    const winGlowMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(2.4, 1.25, 0.38),
-      toneMapped: false
-    });
+    const emberMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.6, 1.35, 0.24), toneMapped: false });
+    const winGlowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.25, 0.38), toneMapped: false });
 
     const cl = LANDMARKS.clachan;
     const bothies = [
@@ -760,12 +717,10 @@ export class WorldRenderer {
       group.add(chimney);
 
       const chLocalX = b.w * 0.34;
-      const cosR = Math.cos(b.rot);
-      const sinR = Math.sin(b.rot);
       this.smokeSources.push({
-        x: bx + chLocalX * cosR,
+        x: bx + chLocalX * Math.cos(b.rot),
         y: by + 5.35,
-        z: bz - chLocalX * sinR
+        z: bz - chLocalX * Math.sin(b.rot)
       });
 
       const door = new THREE.Mesh(new THREE.BoxGeometry(1.12, 1.9, 0.24), this.barkMat);
@@ -787,7 +742,6 @@ export class WorldRenderer {
       this.scene.add(group);
     }
 
-    // Dry-stone enclosure dykes
     const dykeArcs = [
       { a0: 0.3, a1: 1.4, r: 21 },
       { a0: 2.1, a1: 3.5, r: 22 },
@@ -802,8 +756,7 @@ export class WorldRenderer {
         const wx = cl.x + Math.cos(mid) * arc.r;
         const wz = cl.z + Math.sin(mid) * arc.r;
         const wy = heightAt(wx, wz);
-        const segLen = arc.r * (t1 - t0) + 0.35;
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(segLen, 1.18, 0.68), this.darkStoneMat);
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(arc.r * (t1 - t0) + 0.35, 1.18, 0.68), this.darkStoneMat);
         wall.position.set(wx, wy + 0.44, wz);
         wall.rotation.y = -mid + Math.PI / 2;
         wall.castShadow = true;
@@ -812,7 +765,6 @@ export class WorldRenderer {
       }
     }
 
-    // Central Clachan Peat Hearth
     const fireY = heightAt(cl.x, cl.z);
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
@@ -839,7 +791,6 @@ export class WorldRenderer {
     this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 22, phase: 0.4 });
     this.smokeSources.push({ x: cl.x, y: fireY + 0.9, z: cl.z });
 
-    // Scottish Stone Tower-House Keep (Torr an Fhaire)
     const tw = LANDMARKS.watchtower;
     const twY = heightAt(tw.x, tw.z);
     const towerGroup = new THREE.Group();
@@ -863,8 +814,7 @@ export class WorldRenderer {
     corbel.castShadow = true;
     towerGroup.add(corbel);
 
-    const edgePts = [-3.6, -1.2, 1.2, 3.6];
-    for (const p of edgePts) {
+    for (const p of [-3.6, -1.2, 1.2, 3.6]) {
       for (const s of [-3.9, 3.9]) {
         const m1 = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.15, 0.72), this.stoneMat);
         m1.position.set(p, 15.9, s);
@@ -912,7 +862,6 @@ export class WorldRenderer {
     }
     this.scene.add(towerGroup);
 
-    // Smuggling Cove Timber Jetty on Loch Linnhe
     const jt = LANDMARKS.coveJetty;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 3.2), this.barkMat);
     deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z);
@@ -929,7 +878,6 @@ export class WorldRenderer {
       }
     }
 
-    // Stacked Stone Boundary Cairn
     const cr = LANDMARKS.stashCairn;
     const crY = heightAt(cr.x, cr.z);
     for (let layer = 0; layer < 4; layer++) {
@@ -943,7 +891,6 @@ export class WorldRenderer {
       this.scene.add(st);
     }
 
-    // General Wade's Road Stone Milestones
     for (let mz = -360; mz <= 360; mz += 120) {
       const mx = roadCenterX(mz) + 5.2;
       const my = heightAt(mx, mz);
@@ -961,17 +908,12 @@ export class WorldRenderer {
 
     const trunkGeo = createScotsPineWoodGeometry();
     const crownGeo = createScotsPineCanopyFeatheredGeometry();
-    const crownMat = createOnixFoliageMaterial(this.sharedUniforms, {
-      kind: 'pine',
-      map: this.pineBoughTex
-    });
+    const crownMat = createOnixFoliageMaterial(this.sharedUniforms, { kind: 'pine', map: this.pineBoughTex });
 
     const rockGeo = new THREE.IcosahedronGeometry(1.0, 2);
     const rPos = rockGeo.attributes.position;
     for (let i = 0; i < rPos.count; i++) {
-      const vx = rPos.getX(i);
-      const vy = rPos.getY(i);
-      const vz = rPos.getZ(i);
+      const vx = rPos.getX(i), vy = rPos.getY(i), vz = rPos.getZ(i);
       const n = 0.78 + Math.sin(vx * 3.4 + vy * 2.1) * 0.16 + Math.cos(vz * 4.3 - vx * 2.2) * 0.13;
       rPos.setXYZ(i, vx * n, vy * n, vz * n);
     }
@@ -981,12 +923,9 @@ export class WorldRenderer {
     const crowns = new THREE.InstancedMesh(crownGeo, crownMat, maxPines);
     const rocks = new THREE.InstancedMesh(rockGeo, this.boulderMat, maxRocks);
 
-    trunks.castShadow = true;
-    trunks.receiveShadow = true;
-    crowns.castShadow = true;
-    crowns.receiveShadow = true;
-    rocks.castShadow = true;
-    rocks.receiveShadow = true;
+    trunks.castShadow = true; trunks.receiveShadow = true;
+    crowns.castShadow = true; crowns.receiveShadow = true;
+    rocks.castShadow = true; rocks.receiveShadow = true;
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
@@ -1003,9 +942,7 @@ export class WorldRenderer {
 
       const grove = fbm2D(x * 0.011, z * 0.011, 3, 9101);
       if (grove < -0.14 && rng() > 0.16) continue;
-
-      const n = normalAt(x, z, 1.0);
-      if (1 - n.y > 0.27) continue;
+      if (1 - normalAt(x, z, 1.0).y > 0.27) continue;
 
       const scale = 0.92 + rng() * 1.25;
       dummy.position.set(x, y - 0.25, z);
@@ -1020,8 +957,7 @@ export class WorldRenderer {
       crowns.setColorAt(pineCount, color);
       pineCount++;
     }
-    trunks.count = pineCount;
-    crowns.count = pineCount;
+    trunks.count = pineCount; crowns.count = pineCount;
     trunks.instanceMatrix.needsUpdate = true;
     crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
@@ -1035,56 +971,41 @@ export class WorldRenderer {
       if (Math.abs(x - roadCenterX(z)) < 6.5) continue;
       if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 24) continue;
 
-      const sx = 0.65 + rng() * 2.6;
-      const sy = 0.38 + rng() * 1.45;
-      const sz = 0.65 + rng() * 2.6;
+      const sx = 0.65 + rng() * 2.6, sy = 0.38 + rng() * 1.45, sz = 0.65 + rng() * 2.6;
       dummy.position.set(x, y + sy * 0.14, z);
       dummy.rotation.set(rng() * 0.6, rng() * Math.PI * 2, rng() * 0.6);
       dummy.scale.set(sx, sy, sz);
       dummy.updateMatrix();
-
-      rocks.setMatrixAt(rockCount, dummy.matrix);
-      rockCount++;
+      rocks.setMatrixAt(rockCount++, dummy.matrix);
     }
     rocks.count = rockCount;
     rocks.instanceMatrix.needsUpdate = true;
-
     this.scene.add(trunks, crowns, rocks);
   }
 
   _buildStreaming3DFoliage() {
-    // Soft feathered painterly sedge tufts & lush Highland bell-heather shrubs (zero sharp black spikes!)
     const grassGeo = createFeatheredTuftGeometry(1.18, 0.64, 3);
     const heatherGeo = createFeatheredTuftGeometry(1.08, 0.56, 4);
 
     const grassMat = createOnixFoliageMaterial(this.sharedUniforms, {
-      kind: 'grass',
-      map: this.grassTex,
-      fadeStart: 44.0,
-      fadeEnd: 88.0
+      kind: 'grass', map: this.grassTex, fadeStart: 44.0, fadeEnd: 88.0
     });
     const heatherMat = createOnixFoliageMaterial(this.sharedUniforms, {
-      kind: 'heather',
-      map: this.heatherSprigTex,
-      fadeStart: 46.0,
-      fadeEnd: 90.0
+      kind: 'heather', map: this.heatherSprigTex, fadeStart: 46.0, fadeEnd: 90.0
     });
 
     this.grassInst = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
     this.heatherInst = new THREE.InstancedMesh(heatherGeo, heatherMat, MAX_HEATHER);
-
     this.grassInst.receiveShadow = true;
     this.heatherInst.receiveShadow = true;
     this.grassInst.frustumCulled = false;
     this.heatherInst.frustumCulled = false;
-
     this.scene.add(this.grassInst, this.heatherInst);
   }
 
   _updateStreamingFoliage(px, pz, camYaw) {
     const focusX = px - Math.sin(camYaw) * 28.0;
     const focusZ = pz - Math.cos(camYaw) * 28.0;
-
     if (Math.hypot(focusX - this.lastFoliageX, focusZ - this.lastFoliageZ) < 5.5) return;
     this.lastFoliageX = focusX;
     this.lastFoliageZ = focusZ;
@@ -1095,21 +1016,14 @@ export class WorldRenderer {
     const dummy = this.tmpDummy;
     const col = this.tmpColor;
 
-    let gCount = 0;
-    let hCount = 0;
+    let gCount = 0, hCount = 0;
 
     for (let dz = -FOLIAGE_HALF_GRID; dz <= FOLIAGE_HALF_GRID; dz++) {
       for (let dx = -FOLIAGE_HALF_GRID; dx <= FOLIAGE_HALF_GRID; dx++) {
-        const gx = baseGX + dx;
-        const gz = baseGZ + dz;
-
-        const r1 = hash2D(gx, gz, 4101);
-        const r2 = hash2D(gx, gz, 4201);
-        const r3 = hash2D(gx, gz, 4301);
-
+        const gx = baseGX + dx, gz = baseGZ + dz;
+        const r1 = hash2D(gx, gz, 4101), r2 = hash2D(gx, gz, 4201), r3 = hash2D(gx, gz, 4301);
         const wx = (gx + (r1 - 0.5) * 0.96) * FOLIAGE_STEP;
         const wz = (gz + (r2 - 0.5) * 0.96) * FOLIAGE_STEP;
-
         if (Math.hypot(wx - focusX, wz - focusZ) > maxR) continue;
 
         const wy = heightAt(wx, wz);
@@ -1120,7 +1034,6 @@ export class WorldRenderer {
         const surf = surfaceAt(wx, wz);
         if (surf.id === 'granite' || surf.id === 'water' || surf.id === 'shingle') continue;
 
-        // Sweeping heather drifts & lush golden sedge banks matching the painted ground washes
         const drift = fbm2D(wx * 0.024, wz * 0.024, 3, 17447);
         const density = fbm2D(wx * 0.06, wz * 0.06, 2, 17448);
         if (density < -0.34 && r3 < 0.65) continue;
@@ -1138,15 +1051,13 @@ export class WorldRenderer {
           this.heatherInst.setMatrixAt(hCount, dummy.matrix);
           const shade = 0.78 + r2 * 0.36;
           col.setRGB(shade * 1.04, shade * 0.96, shade * 1.05);
-          this.heatherInst.setColorAt(hCount, col);
-          hCount++;
+          this.heatherInst.setColorAt(hCount++, col);
         } else {
           if (gCount >= MAX_GRASS) continue;
           this.grassInst.setMatrixAt(gCount, dummy.matrix);
           const shade = 0.78 + r1 * 0.36;
           col.setRGB(shade * 1.04, shade, shade * 0.90);
-          this.grassInst.setColorAt(gCount, col);
-          gCount++;
+          this.grassInst.setColorAt(gCount++, col);
         }
       }
     }
@@ -1161,8 +1072,7 @@ export class WorldRenderer {
 
   _buildSmokeAndRain() {
     const c = document.createElement('canvas');
-    c.width = 64;
-    c.height = 64;
+    c.width = 64; c.height = 64;
     const ctx = c.getContext('2d');
     const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
     g.addColorStop(0, 'rgba(215,212,204,0.56)');
@@ -1174,13 +1084,9 @@ export class WorldRenderer {
 
     for (const src of this.smokeSources || []) {
       for (let i = 0; i < 9; i++) {
-        const mat = new THREE.SpriteMaterial({
-          map: smokeTex,
-          transparent: true,
-          opacity: 0.34,
-          depthWrite: false
-        });
-        const sprite = new THREE.Sprite(mat);
+        const sprite = new THREE.Sprite(
+          new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0.34, depthWrite: false })
+        );
         this.scene.add(sprite);
         this.smokeParticles.push({ sprite, src, age: i / 9, speed: 0.13 + (i % 4) * 0.025, seed: i * 1.9 });
       }
@@ -1197,13 +1103,10 @@ export class WorldRenderer {
     }
     const rainGeo = new THREE.BufferGeometry();
     rainGeo.setAttribute('position', new THREE.BufferAttribute(this.rainPositions, 3));
-    const rainMat = new THREE.LineBasicMaterial({
-      color: 0xb6c6d4,
-      transparent: true,
-      opacity: 0.36,
-      depthWrite: false
-    });
-    this.rainLines = new THREE.LineSegments(rainGeo, rainMat);
+    this.rainLines = new THREE.LineSegments(
+      rainGeo,
+      new THREE.LineBasicMaterial({ color: 0xb6c6d4, transparent: true, opacity: 0.36, depthWrite: false })
+    );
     this.rainLines.frustumCulled = false;
     this.rainLines.visible = false;
     this.scene.add(this.rainLines);
@@ -1211,6 +1114,7 @@ export class WorldRenderer {
 
   _buildCallumMesh() {
     this.callum = new THREE.Group();
+    this.callum.rotation.order = 'YXZ';
 
     const woolCoatMat = new THREE.MeshStandardMaterial({ color: 0x2a241d, roughness: 0.92 });
     const leatherMat = new THREE.MeshStandardMaterial({ color: 0x221710, roughness: 0.76 });
@@ -1328,8 +1232,7 @@ export class WorldRenderer {
 
     for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
       for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
-        const cx = pcx + dx;
-        const cz = pcz + dz;
+        const cx = pcx + dx, cz = pcz + dz;
         const key = `${cx},${cz}`;
         needed.add(key);
 
@@ -1368,7 +1271,6 @@ export class WorldRenderer {
     const storm = this.skyUniforms.uStormFactor.value;
     const rain = this.sharedUniforms.uRain.value;
 
-    // 24h Highland Sun Arc (sun sets directly west over Loch Linnhe at ~18:30-19:30!)
     const sunAngle = ((worldState.timeOfDay - 6) / 24) * Math.PI * 2;
     const elev = Math.sin(sunAngle);
     const horiz = Math.cos(sunAngle);
@@ -1388,7 +1290,6 @@ export class WorldRenderer {
     this.sunLight.target.position.set(snapX, 0, snapZ);
     this.sunLight.target.updateMatrixWorld();
 
-    // Sync Turner valley fog color so 2.6 km Lochaber & Ardgour peaks layer into golden-slate oil washes
     const fogNight = new THREE.Color(0x091220);
     const fogDay = new THREE.Color(0x6b8092).lerp(new THREE.Color(0x47525e), storm);
     const fogGold = new THREE.Color(0xd28444);
@@ -1406,8 +1307,7 @@ export class WorldRenderer {
 
     for (const f of this.flickerLights) {
       const pulse = 0.88 + Math.sin(this.elapsed * 9.5 + f.phase) * 0.1 + Math.sin(this.elapsed * 21 + f.phase) * 0.06;
-      const nightBoost = lerp(2.0, 0.95, dayFactor);
-      f.light.intensity = f.baseIntensity * pulse * nightBoost;
+      f.light.intensity = f.baseIntensity * pulse * lerp(2.0, 0.95, dayFactor);
       f.flame.scale.set(1, pulse, 1);
     }
 
@@ -1420,16 +1320,13 @@ export class WorldRenderer {
     if (this.rainLines.visible) {
       this.rainLines.material.opacity = rain * 0.38;
       const wind = this.onixField.sampleWind(px, pz);
-      const pos = this.rainPositions;
-      const off = this.rainOffsets;
+      const pos = this.rainPositions, off = this.rainOffsets;
       const count = off.length / 3;
-      const fallSpeed = 24.0;
-      const slantX = wind.x * 0.28;
-      const slantZ = wind.z * 0.28;
+      const slantX = wind.x * 0.28, slantZ = wind.z * 0.28;
 
       for (let i = 0; i < count; i++) {
         const oi = i * 3;
-        off[oi + 1] -= fallSpeed * dt;
+        off[oi + 1] -= 24.0 * dt;
         if (off[oi + 1] < -2) off[oi + 1] += 22;
 
         const rx = this.camera.position.x + off[oi];
@@ -1437,12 +1334,8 @@ export class WorldRenderer {
         const rz = this.camera.position.z + off[oi + 2];
 
         const pi = i * 6;
-        pos[pi] = rx;
-        pos[pi + 1] = ry;
-        pos[pi + 2] = rz;
-        pos[pi + 3] = rx + slantX;
-        pos[pi + 4] = ry - 0.85;
-        pos[pi + 5] = rz + slantZ;
+        pos[pi] = rx; pos[pi + 1] = ry; pos[pi + 2] = rz;
+        pos[pi + 3] = rx + slantX; pos[pi + 4] = ry - 0.85; pos[pi + 5] = rz + slantZ;
       }
       this.rainLines.geometry.attributes.position.needsUpdate = true;
     }
@@ -1465,7 +1358,7 @@ export class WorldRenderer {
     }
   }
 
-  update(dt, player, worldState) {
+  update(dt, player, mount, worldState) {
     this.elapsed += dt;
     this.sharedUniforms.uTime.value = this.elapsed;
 
@@ -1477,35 +1370,68 @@ export class WorldRenderer {
     this.waterMesh.position.x = Math.round(player.x / 50) * 50;
     this.waterMesh.position.z = Math.round(player.z / 50) * 50;
 
-    this.callum.position.set(player.x, player.y, player.z);
-    this.callum.rotation.y = player.facingYaw;
+    // Update Bramble (Highland Garron)
+    this.bramble.update(mount, this.elapsed);
 
-    const strideAmp = clamp(player.speed / 5.0, 0, 1);
-    const swing = Math.sin(player.stridePhase) * 0.55 * strideAmp;
-    this.leftLeg.rotation.x = swing;
-    this.rightLeg.rotation.x = -swing;
-    this.leftArm.rotation.x = -swing * 0.75;
-    this.rightArm.rotation.x = swing * 0.75;
+    // Update Callum (either walking on foot or seated seamlessly astride Bramble's saddle)
+    if (mount.mounted) {
+      const horseBob = this.bramble.bodyGroup.position.y;
+      const leanFwd = clamp(mount.speed / 14.0, 0, 1) * 0.24;
 
-    this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
-    this.callumBody.rotation.x = player.crouchBlend * 0.28 + strideAmp * 0.06;
+      this.callum.position.set(mount.x, mount.y + 0.86 + horseBob, mount.z);
+      this.callum.rotation.y = mount.yaw;
+      this.callum.rotation.x = mount.pitch * 0.55;
+      this.callum.rotation.z = -mount.roll * 0.55;
 
-    const shoulderRight = 0.55;
-    const pivotY = player.y + lerp(1.62, 1.18, player.crouchBlend);
+      this.callumBody.position.y = 0;
+      this.callumBody.rotation.x = -leanFwd;
+
+      // Legs astride Bramble's flanks, forearms forward holding the leather reins
+      this.leftLeg.rotation.set(0.32, 0, 0.34);
+      this.rightLeg.rotation.set(0.32, 0, -0.34);
+      const reinBob = Math.sin(mount.stridePhase) * 0.08 * clamp(mount.speed / 10, 0, 1);
+      this.leftArm.rotation.set(0.72 + reinBob, 0, -0.14);
+      this.rightArm.rotation.set(0.72 + reinBob, 0, 0.14);
+    } else {
+      this.callum.position.set(player.x, player.y, player.z);
+      this.callum.rotation.set(0, player.facingYaw, 0);
+
+      const strideAmp = clamp(player.speed / 5.0, 0, 1);
+      const swing = Math.sin(player.stridePhase) * 0.55 * strideAmp;
+      this.leftLeg.rotation.set(swing, 0, 0);
+      this.rightLeg.rotation.set(-swing, 0, 0);
+      this.leftArm.rotation.set(-swing * 0.75, 0, 0);
+      this.rightArm.rotation.set(swing * 0.75, 0, 0);
+
+      this.callumBody.position.y = -player.crouchBlend * 0.34 + Math.abs(Math.cos(player.stridePhase)) * 0.05 * strideAmp;
+      this.callumBody.rotation.x = player.crouchBlend * 0.28 + strideAmp * 0.06;
+    }
+
+    // Dynamic RDR2 camera: pulls smoothly back on horseback & widens FOV slightly at full gallop
+    const speedNorm = mount.mounted ? clamp(mount.speed / 14.0, 0, 1) : 0;
+    const targetFov = mount.mounted ? lerp(56, 63, speedNorm) : 54;
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = lerp(this.camera.fov, targetFov, 1 - Math.exp(-5 * dt));
+      this.camera.updateProjectionMatrix();
+    }
+
+    const shoulderRight = mount.mounted ? 0.65 : 0.55;
+    const activeDist = mount.mounted ? player.camDistance + 1.55 + speedNorm * 0.9 : player.camDistance;
+    const pivotY = mount.mounted ? mount.y + 2.25 : player.y + lerp(1.62, 1.18, player.crouchBlend);
 
     const cosP = Math.cos(player.camPitch);
     const sinP = Math.sin(player.camPitch);
     const sinY = Math.sin(player.camYaw);
     const cosY = Math.cos(player.camYaw);
 
-    const desiredX = player.x + sinY * cosP * player.camDistance + cosY * shoulderRight;
-    const desiredZ = player.z + cosY * cosP * player.camDistance - sinY * shoulderRight;
-    let desiredY = pivotY + sinP * player.camDistance;
+    const desiredX = player.x + sinY * cosP * activeDist + cosY * shoulderRight;
+    const desiredZ = player.z + cosY * cosP * activeDist - sinY * shoulderRight;
+    let desiredY = pivotY + sinP * activeDist;
 
-    const camTerrainY = heightAt(desiredX, desiredZ) + 0.55;
+    const camTerrainY = heightAt(desiredX, desiredZ) + 0.65;
     if (desiredY < camTerrainY) desiredY = camTerrainY;
 
-    const camAlpha = 1 - Math.exp(-14 * dt);
+    const camAlpha = 1 - Math.exp(-(mount.mounted ? 11 : 14) * dt);
     if (this.camPos.lengthSq() === 0) {
       this.camPos.set(desiredX, desiredY, desiredZ);
       this.camLook.set(player.x, pivotY, player.z);
