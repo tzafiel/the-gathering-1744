@@ -1,4 +1,5 @@
 import { InputManager } from './core/input.js';
+import { clamp } from './core/prng.js';
 import {
   createDefaultWorldState,
   loadWorldState,
@@ -6,11 +7,14 @@ import {
   exportWorldStateJSON,
   importWorldStateJSON
 } from './world/worldState.js';
-import { getRegionName, LANDMARKS } from './world/terrain.js';
+import { getRegionName, LANDMARKS, WATER_LEVEL } from './world/terrain.js';
 import { PlayerController } from './sim/player.js';
+import { OnixField } from './sim/onixField.js';
 import { WorldRenderer } from './render/worldRenderer.js';
 
 const FIXED_DT = 1 / 60;
+const WEATHER_STATES = ['clear', 'mist', 'rain'];
+const WEATHER_LABELS = { clear: 'SUNBREAK', mist: 'GLEN MIST', rain: 'HIGHLAND RAIN' };
 
 function boot() {
   window.__GATHERING_BOOTED = true;
@@ -25,6 +29,7 @@ function boot() {
   const stancePill = document.getElementById('stance-pill');
   const surfacePill = document.getElementById('surface-pill');
   const wetnessPill = document.getElementById('wetness-pill');
+  const weatherPill = document.getElementById('weather-pill');
   const clockReadout = document.getElementById('clock-readout');
   const telemetryReadout = document.getElementById('telemetry-readout');
   const compassTape = document.getElementById('compass-tape');
@@ -35,8 +40,9 @@ function boot() {
 
   let worldState = loadWorldState();
   let player = new PlayerController(worldState);
+  const onixField = new OnixField(64, worldState.worldSeed || 1744);
   const input = new InputManager(canvas);
-  const renderer = new WorldRenderer(canvas);
+  const renderer = new WorldRenderer(canvas, onixField);
 
   try {
     renderer.init();
@@ -123,7 +129,6 @@ function boot() {
 
   overlayStatus.textContent = `Ready · ${renderer.getBackendName()} · Day ${worldState.dayCount}`;
 
-  // Initial render behind title screen
   renderer.update(FIXED_DT, player, worldState);
   renderer.render();
   telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m`;
@@ -147,6 +152,18 @@ function boot() {
       return;
     }
 
+    if (frameInput.weatherToggle) {
+      const idx = WEATHER_STATES.indexOf(worldState.weather?.state || 'clear');
+      worldState.weather = {
+        state: WEATHER_STATES[(idx + 1) % WEATHER_STATES.length],
+        intensity: 1.0
+      };
+    }
+
+    const wState = worldState.weather?.state || 'clear';
+    const rainIntensity = wState === 'rain' ? 1.0 : 0.0;
+    const windStrength = wState === 'rain' ? 1.65 : wState === 'mist' ? 0.65 : 1.05;
+
     worldState.timeOfDay += frameDt * (24 / 1440) + frameInput.timeDelta;
     if (worldState.timeOfDay >= 24) {
       worldState.timeOfDay -= 24;
@@ -155,9 +172,15 @@ function boot() {
       worldState.timeOfDay += 24;
     }
 
+    // Fixed 60Hz deterministic simulation: Callum kinematics + ONIX lattice + symplectic water wakes
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
       player.update(FIXED_DT, frameInput);
+      if (rainIntensity > 0) {
+        player.wetness = clamp(player.wetness + 0.065 * FIXED_DT, 0, 1);
+      }
+      onixField.step(FIXED_DT, rainIntensity, windStrength);
+      onixField.stepWaterRipples(FIXED_DT, player.x, player.y, player.z, player.speed, WATER_LEVEL);
       accumulator -= FIXED_DT;
     }
 
@@ -184,6 +207,7 @@ function boot() {
     stancePill.textContent = player.stance;
     surfacePill.textContent = player.surface.label;
     wetnessPill.textContent = player.wetness > 0.55 ? 'SOAKED' : player.wetness > 0.15 ? 'DAMP' : 'DRY';
+    if (weatherPill) weatherPill.textContent = WEATHER_LABELS[wState] || 'SUNBREAK';
     clockReadout.textContent = formatClock(worldState.timeOfDay);
     compassTape.textContent = formatCompass(player.camYaw);
     telemetryReadout.textContent = `${renderer.getBackendName()} · ${Math.round(player.x)}E ${Math.round(player.z)}N · ${Math.round(player.y)}m${frameInput.gamepadConnected ? ' · PAD' : ''}`;
