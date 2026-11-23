@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gathering-1744-v10';
+const CACHE_NAME = 'gathering-1744-v11';
 
 const APP_SHELL = [
   './',
@@ -18,6 +18,7 @@ const APP_SHELL = [
   './src/audio/synth.js',
   './src/render/painterlyPost.js',
   './src/render/onixShaders.js',
+  './src/render/fpRig.js',
   './src/render/mountMesh.js',
   './src/render/redcoatMesh.js',
   './src/render/combatFX.js',
