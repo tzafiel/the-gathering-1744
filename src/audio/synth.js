@@ -1,11 +1,6 @@
 import { clamp } from '../core/prng.js';
 import { LANDMARKS, WATER_LEVEL } from '../world/terrain.js';
 
-// 100% Offline Procedural Web Audio Engine for 1744 — The Gathering.
-// Zero audio file downloads: synthesizes Atlantic glen wind (coupled to ONIX wind),
-// driving rain, lapping Loch Linnhe shoreline, crackling peat hearths, surface-aware
-// footsteps & hoofbeats, Callum's echoed whistle, Bramble's calls, and Highland landmark drones.
-
 export class HighlandAudio {
   constructor() {
     this.ctx = null;
@@ -14,7 +9,6 @@ export class HighlandAudio {
     this.crackleAccum = 0;
   }
 
-  // Must be triggered from a user gesture (Enter the Glen click / keypress)
   unlock() {
     if (this.ready) {
       if (this.ctx && this.ctx.state === 'suspended') {
@@ -53,7 +47,6 @@ export class HighlandAudio {
     const buf = this.ctx.createBuffer(1, len, sr);
     const data = buf.getChannelData(0);
 
-    // Pink-weighted natural noise (warmer and far more realistic than harsh white static)
     let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
     for (let i = 0; i < len; i++) {
       const white = Math.random() * 2 - 1;
@@ -72,9 +65,9 @@ export class HighlandAudio {
   _buildMasterGraph() {
     const ctx = this.ctx;
     this.compressor = ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -16;
+    this.compressor.threshold.value = -14;
     this.compressor.knee.value = 18;
-    this.compressor.ratio.value = 4;
+    this.compressor.ratio.value = 4.5;
 
     this.masterGain = ctx.createGain();
     this.masterGain.gain.value = 0.78;
@@ -82,20 +75,20 @@ export class HighlandAudio {
     this.compressor.connect(this.masterGain);
     this.masterGain.connect(ctx.destination);
 
-    // Subtle glen canyon echo bus for Callum's whistle & distant calls
+    // Highland glen canyon echo bus (whistles, steel clangs, flintlock blasts)
     this.echoIn = ctx.createGain();
-    this.echoIn.gain.value = 0.35;
-    const delay1 = ctx.createDelay(1.0);
+    this.echoIn.gain.value = 0.36;
+    const delay1 = ctx.createDelay(1.2);
     delay1.delayTime.value = 0.28;
-    const delay2 = ctx.createDelay(1.0);
-    delay2.delayTime.value = 0.58;
+    const delay2 = ctx.createDelay(1.2);
+    delay2.delayTime.value = 0.62;
     const echoFilter = ctx.createBiquadFilter();
     echoFilter.type = 'lowpass';
-    echoFilter.frequency.value = 1650;
+    echoFilter.frequency.value = 1550;
     const echoGain1 = ctx.createGain();
-    echoGain1.gain.value = 0.38;
+    echoGain1.gain.value = 0.40;
     const echoGain2 = ctx.createGain();
-    echoGain2.gain.value = 0.18;
+    echoGain2.gain.value = 0.20;
 
     this.echoIn.connect(delay1);
     delay1.connect(echoFilter);
@@ -121,7 +114,6 @@ export class HighlandAudio {
   _buildAmbientBeds() {
     const ctx = this.ctx;
 
-    // 1. Highland Glen Wind Bed (sweeping filter coupled to live ONIX wind speed & ridge altitude)
     const windSrc = this._makeLoopingNoise();
     this.windFilter = ctx.createBiquadFilter();
     this.windFilter.type = 'bandpass';
@@ -131,7 +123,6 @@ export class HighlandAudio {
     this.windGain.gain.value = 0.12;
     windSrc.connect(this.windFilter).connect(this.windGain).connect(this.compressor);
 
-    // Low moorland wind rumble
     const rumbleSrc = this._makeLoopingNoise();
     const rumbleFilter = ctx.createBiquadFilter();
     rumbleFilter.type = 'lowpass';
@@ -140,7 +131,6 @@ export class HighlandAudio {
     this.rumbleGain.gain.value = 0.16;
     rumbleSrc.connect(rumbleFilter).connect(this.rumbleGain).connect(this.compressor);
 
-    // 2. Driving Highland Rain Bed
     const rainSrc = this._makeLoopingNoise();
     const rainHP = ctx.createBiquadFilter();
     rainHP.type = 'highpass';
@@ -152,7 +142,6 @@ export class HighlandAudio {
     this.rainGain.gain.value = 0.0001;
     rainSrc.connect(rainHP).connect(rainLP).connect(this.rainGain).connect(this.compressor);
 
-    // 3. Loch Linnhe Shoreline Surf (slow rhythmic wave wash when near sea level)
     const surfSrc = this._makeLoopingNoise();
     this.surfFilter = ctx.createBiquadFilter();
     this.surfFilter.type = 'lowpass';
@@ -161,7 +150,6 @@ export class HighlandAudio {
     this.surfGain.gain.value = 0.0001;
     surfSrc.connect(this.surfFilter).connect(this.surfGain).connect(this.compressor);
 
-    // 4. Peat Hearth & Brazier Fire Bed
     const fireSrc = this._makeLoopingNoise();
     const fireBP = ctx.createBiquadFilter();
     fireBP.type = 'bandpass';
@@ -176,7 +164,6 @@ export class HighlandAudio {
     if (!this.ready || !this.ctx || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
 
-    // Wind driven by live ONIX chiral vector + ridge exposure altitude
     const w = onixField.sampleWind(px, pz);
     const windMag = Math.hypot(w.x, w.z);
     const altFactor = clamp((py - 4) / 55, 0, 1);
@@ -187,23 +174,19 @@ export class HighlandAudio {
     this.windGain.gain.setTargetAtTime(windLevel, now, 0.2);
     this.rumbleGain.gain.setTargetAtTime(windLevel * 0.75, now, 0.25);
 
-    // Rain bed
     this.rainGain.gain.setTargetAtTime(rainIntensity * 0.34, now, 0.35);
 
-    // Loch Linnhe shoreline surf proximity
     const shoreProx = clamp(1 - Math.max(0, py - WATER_LEVEL) / 14, 0, 1);
     const wavePulse = 0.55 + Math.sin(elapsed * 0.95) * 0.45;
     this.surfFilter.frequency.setTargetAtTime(200 + wavePulse * 260, now, 0.18);
     this.surfGain.gain.setTargetAtTime(shoreProx * (0.14 + wavePulse * 0.12), now, 0.25);
 
-    // Nearest fire source (Baile MacRae hearth or Torr an Fhaire braziers)
     const dClachan = Math.hypot(px - LANDMARKS.clachan.x, pz - LANDMARKS.clachan.z);
     const dTower = Math.hypot(px - LANDMARKS.watchtower.x, pz - LANDMARKS.watchtower.z);
     const nearestFire = Math.min(dClachan, dTower);
     const fireProx = clamp(1 - nearestFire / 26, 0, 1);
     this.fireGain.gain.setTargetAtTime(fireProx * fireProx * 0.32, now, 0.15);
 
-    // Organic stochastic peat-ember crackles when standing near a fire
     if (fireProx > 0.12) {
       this.crackleAccum += dt * (4.0 + fireProx * 12.0);
       if (this.crackleAccum >= 1) {
@@ -229,7 +212,6 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2.5, 0.06);
   }
 
-  // Surface-accurate footstep (Callum) or rhythmic iron-shod hoofbeat (Bramble)
   playStep(surfaceId, intensity = 0.7, isHoof = false, dist = 0) {
     if (!this.ready || !this.ctx || this.ctx.state !== 'running') return;
     const atten = clamp(1 - dist / 45, 0, 1);
@@ -239,7 +221,6 @@ export class HighlandAudio {
     const now = ctx.currentTime;
     const vol = intensity * atten * (isHoof ? 0.34 : 0.18);
 
-    // 1. Earth / hoof weight thump
     const osc = ctx.createOscillator();
     const oscGain = ctx.createGain();
     const baseFreq =
@@ -257,7 +238,6 @@ export class HighlandAudio {
     osc.start(now);
     osc.stop(now + 0.11);
 
-    // 2. Surface texture noise burst (heather brush, mud squelch, gravel crunch, or loch splash)
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
     const filt = ctx.createBiquadFilter();
@@ -285,7 +265,6 @@ export class HighlandAudio {
       dur = 0.065;
       nGain.gain.setValueAtTime(vol * (isHoof ? 1.2 : 0.85), now);
     } else {
-      // Heather & Highland grass swish
       filt.type = 'bandpass';
       filt.frequency.value = 1100 + Math.random() * 450;
       filt.Q.value = 1.1;
@@ -298,7 +277,224 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2.5, dur + 0.02);
   }
 
-  // Callum's sharp two-tone frontier whistle echoing across the glen
+  // Broadsword / Dirk air slice
+  playSwing(kind = 'fast_left', heavy = false) {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    const fStart = kind === 'wipe' ? 2400 : heavy ? 360 : 620;
+    const fEnd = kind === 'wipe' ? 900 : heavy ? 1150 : 1850;
+    const dur = kind === 'wipe' ? 0.24 : heavy ? 0.30 : 0.18;
+
+    bp.frequency.setValueAtTime(fStart, now);
+    bp.frequency.exponentialRampToValueAtTime(fEnd, now + dur * 0.55);
+    bp.frequency.exponentialRampToValueAtTime(220, now + dur);
+    bp.Q.value = kind === 'wipe' ? 4.0 : 2.2;
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(heavy ? 0.34 : 0.22, now + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    src.connect(bp).connect(g).connect(this.compressor);
+    src.start(now, Math.random() * 2, dur + 0.02);
+  }
+
+  // Sharp ringing steel-on-steel Perfect Parry clang echoing off the glen walls!
+  playParry() {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const partials = [1180, 1890, 2740, 4120];
+    for (let i = 0; i < partials.length; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = i % 2 === 0 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(partials[i] * (0.96 + Math.random() * 0.08), now);
+      osc.frequency.exponentialRampToValueAtTime(partials[i] * 0.94, now + 0.45);
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime((0.18 / (i + 1)), now);
+      g.gain.exponentialRampToValueAtTime(0.0008, now + (0.48 - i * 0.07));
+
+      osc.connect(g);
+      g.connect(this.compressor);
+      g.connect(this.echoIn);
+      osc.start(now);
+      osc.stop(now + 0.52);
+    }
+  }
+
+  // Heavy studded oak Targe thud / splintering musket-ball deflection
+  playTargeBlock(isBall = false, back = false) {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(isBall ? 210 : 155, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + 0.16);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(isBall ? 0.52 : 0.38, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(g).connect(this.compressor);
+    osc.start(now);
+    osc.stop(now + 0.19);
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = back ? 1400 : 950;
+    bp.Q.value = 1.6;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(isBall ? 0.42 : 0.28, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    src.connect(bp).connect(ng).connect(this.compressor);
+    src.start(now, Math.random() * 2, 0.16);
+  }
+
+  // Visceral flesh cut & heavy bone/dismemberment crunch
+  playBloodHit(heavy = false, sever = false) {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // Low wet impact thud
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(sever ? 140 : 115, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + (sever ? 0.22 : 0.12));
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(sever ? 0.55 : heavy ? 0.40 : 0.26, now);
+    og.gain.exponentialRampToValueAtTime(0.001, now + (sever ? 0.24 : 0.14));
+    osc.connect(og).connect(this.compressor);
+    osc.start(now);
+    osc.stop(now + 0.25);
+
+    // Wet tearing slash & bone snap burst
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(sever ? 1650 : 1150, now);
+    bp.frequency.exponentialRampToValueAtTime(340, now + (sever ? 0.24 : 0.14));
+    bp.Q.value = 1.5;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(sever ? 0.52 : heavy ? 0.36 : 0.24, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + (sever ? 0.26 : 0.16));
+    src.connect(bp).connect(ng).connect(this.compressor);
+    src.start(now, Math.random() * 2, 0.28);
+  }
+
+  // Massive black-powder flintlock / Brown Bess crack rolling through the valley
+  playGunshot(dist = 0) {
+    if (!this.ready || !this.ctx) return;
+    const atten = clamp(1 - dist / 140, 0.12, 1);
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const boom = ctx.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(160, now);
+    boom.frequency.exponentialRampToValueAtTime(28, now + 0.28);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(0.68 * atten, now);
+    bg.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    boom.connect(bg);
+    bg.connect(this.compressor);
+    bg.connect(this.echoIn);
+    boom.start(now);
+    boom.stop(now + 0.34);
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(4800 * atten + 600, now);
+    lp.frequency.exponentialRampToValueAtTime(320, now + 0.45);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.75 * atten, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+    src.connect(lp).connect(ng);
+    ng.connect(this.compressor);
+    ng.connect(this.echoIn);
+    src.start(now, Math.random() * 1.5, 0.50);
+  }
+
+  // Wet priming-pan fizzle / dry flint click
+  playMisfire(dist = 0) {
+    if (!this.ready || !this.ctx) return;
+    const atten = clamp(1 - dist / 45, 0.1, 1);
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2400;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.28 * atten, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    src.connect(hp).connect(g).connect(this.compressor);
+    src.start(now, Math.random() * 2, 0.24);
+  }
+
+  // Quiet taut Highland bowstring release
+  playBowRelease() {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(240, now);
+    osc.frequency.exponentialRampToValueAtTime(86, now + 0.16);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.24, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(g).connect(this.compressor);
+    osc.start(now);
+    osc.stop(now + 0.19);
+  }
+
+  // Distant Hanoverian corporal shout / whistle warning
+  playRedcoatBark(kind = 'spot', dist = 10) {
+    if (!this.ready || !this.ctx) return;
+    const atten = clamp(1 - dist / 80, 0.1, 1);
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    const f0 = kind === 'retreat' ? 320 : kind === 'spot' ? 255 : 200;
+    osc.frequency.setValueAtTime(f0, now);
+    osc.frequency.exponentialRampToValueAtTime(f0 * 0.72, now + 0.28);
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 820;
+    bp.Q.value = 2.5;
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.14 * atten, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+    osc.connect(bp).connect(g);
+    g.connect(this.compressor);
+    g.connect(this.echoIn);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  }
+
   playWhistle() {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
@@ -311,7 +507,6 @@ export class HighlandAudio {
     osc.frequency.setValueAtTime(2320, now + 0.24);
     osc.frequency.exponentialRampToValueAtTime(1820, now + 0.44);
 
-    // Subtle human breath vibrato
     const lfo = ctx.createOscillator();
     const lfoGain = ctx.createGain();
     lfo.frequency.value = 6.5;
@@ -334,7 +529,6 @@ export class HighlandAudio {
     lfo.stop(now + 0.50);
   }
 
-  // Bramble's organic vocalizations: answering whinny, warm nicker, or energetic snort
   playHorseVocal(kind = 'nicker', dist = 0) {
     if (!this.ready || !this.ctx) return;
     const atten = clamp(1 - dist / 110, 0.12, 1);
@@ -373,7 +567,6 @@ export class HighlandAudio {
       osc.stop(now + 0.98);
       vib.stop(now + 0.98);
     } else if (kind === 'nicker') {
-      // Low warm fluttering greeting when Callum pats or mounts Bramble
       const osc = ctx.createOscillator();
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(135, now);
@@ -399,7 +592,6 @@ export class HighlandAudio {
       osc.stop(now + 0.46);
       ampMod.stop(now + 0.46);
     } else {
-      // Energetic nasal huff/snort on jump or gallop surge
       const src = ctx.createBufferSource();
       src.buffer = this.noiseBuffer;
       const bp = ctx.createBiquadFilter();
@@ -415,12 +607,11 @@ export class HighlandAudio {
     }
   }
 
-  // Subtle haunting Scottish open-fifth Highland drone swell on discovering a landmark
   playRegionChord() {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
-    const freqs = [146.83, 220.0, 293.66]; // D3 - A3 - D4 (classic Highland modal fifth)
+    const freqs = [146.83, 220.0, 293.66];
 
     for (let i = 0; i < freqs.length; i++) {
       const osc = ctx.createOscillator();
