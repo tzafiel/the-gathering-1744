@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {
   heightAt,
-  normalAt,
   surfaceAt,
   roadCenterX,
   WATER_LEVEL,
@@ -322,12 +321,13 @@ function createGableRoofGeometry(width, depth, ridgeHeight) {
 }
 
 export class WorldRenderer {
-  constructor(canvas, onixField) {
+  constructor(canvas, onixField, colliders) {
     this.canvas = canvas;
     this.onixField = onixField;
+    this.colliders = colliders;
     this.scene = new THREE.Scene();
 
-    // Pure First-Person & WebXR-ready eye rig (0.06m near plane keeps hands & blades crisp)
+    // Pure First-Person & WebXR-ready eye rig
     this.playerRig = new THREE.Group();
     this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.06, 3200);
     this.camera.rotation.order = 'YXZ';
@@ -401,7 +401,6 @@ export class WorldRenderer {
     this._buildStreaming3DFoliage();
     this._buildSmokeAndRain();
 
-    // Dedicated Dishonored-style First-Person arms & arsenal attached to camera
     this.fpRig = new FirstPersonRig(this.plaidMat);
     this.camera.add(this.fpRig.root);
 
@@ -624,18 +623,12 @@ export class WorldRenderer {
     const winGlowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.25, 0.38), toneMapped: false });
 
     const cl = LANDMARKS.clachan;
-    const bothies = [
-      { dx: -12, dz: -7, w: 8.4, d: 5.0, rot: 0.25 },
-      { dx: 11, dz: -10, w: 7.4, d: 4.6, rot: -0.42 },
-      { dx: 4, dz: 12, w: 8.8, d: 5.2, rot: 1.38 }
-    ];
-
     this.smokeSources = [];
 
-    for (const b of bothies) {
-      const bx = cl.x + b.dx, bz = cl.z + b.dz, by = heightAt(bx, bz);
+    // 1. Baile MacRae Stone Blackhouses (1-to-1 synced with WorldColliders)
+    for (const b of this.colliders.bothies) {
       const group = new THREE.Group();
-      group.position.set(bx, by, bz);
+      group.position.set(b.x, b.y, b.z);
       group.rotation.y = b.rot;
 
       const walls = new THREE.Mesh(new THREE.BoxGeometry(b.w, 2.7, b.d), this.stoneMat);
@@ -654,7 +647,7 @@ export class WorldRenderer {
       chimney.position.set(b.w * 0.34, 4.4, 0); chimney.castShadow = true;
       group.add(chimney);
 
-      this.smokeSources.push({ x: bx + b.w * 0.34 * Math.cos(b.rot), y: by + 5.35, z: bz - b.w * 0.34 * Math.sin(b.rot) });
+      this.smokeSources.push({ x: b.x + b.w * 0.34 * Math.cos(b.rot), y: b.y + 5.35, z: b.z - b.w * 0.34 * Math.sin(b.rot) });
 
       const door = new THREE.Mesh(new THREE.BoxGeometry(1.12, 1.9, 0.24), this.barkMat);
       door.position.set(0, 0.9, b.d * 0.5 + 0.02);
@@ -668,19 +661,16 @@ export class WorldRenderer {
       this.scene.add(group);
     }
 
-    for (const arc of [{ a0: 0.3, a1: 1.4, r: 21 }, { a0: 2.1, a1: 3.5, r: 22 }, { a0: 4.1, a1: 5.4, r: 20 }]) {
-      for (let i = 0; i < 6; i++) {
-        const t0 = lerp(arc.a0, arc.a1, i / 6), t1 = lerp(arc.a0, arc.a1, (i + 1) / 6);
-        const mid = (t0 + t1) * 0.5;
-        const wx = cl.x + Math.cos(mid) * arc.r, wz = cl.z + Math.sin(mid) * arc.r;
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(arc.r * (t1 - t0) + 0.35, 1.18, 0.68), this.darkStoneMat);
-        wall.position.set(wx, heightAt(wx, wz) + 0.44, wz);
-        wall.rotation.y = -mid + Math.PI / 2;
-        wall.castShadow = true; wall.receiveShadow = true;
-        this.scene.add(wall);
-      }
+    // 2. Dry-Stone Enclosure Dykes (1-to-1 synced with WorldColliders)
+    for (const d of this.colliders.dykes) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(d.len, 1.18, 0.68), this.darkStoneMat);
+      wall.position.set(d.x, d.y + 0.44, d.z);
+      wall.rotation.y = d.rotY;
+      wall.castShadow = true; wall.receiveShadow = true;
+      this.scene.add(wall);
     }
 
+    // 3. Central Clachan Peat Hearth
     const fireY = heightAt(cl.x, cl.z);
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
@@ -706,6 +696,7 @@ export class WorldRenderer {
     this.flickerLights.push({ light: hearthLight, flame, baseIntensity: 22, phase: 0.4 });
     this.smokeSources.push({ x: cl.x, y: fireY + 0.9, z: cl.z });
 
+    // 4. Torr an Fhaire Tower-House Keep
     const tw = LANDMARKS.watchtower, twY = heightAt(tw.x, tw.z);
     const towerGroup = new THREE.Group();
     towerGroup.position.set(tw.x, twY, tw.z);
@@ -751,6 +742,7 @@ export class WorldRenderer {
     }
     this.scene.add(towerGroup);
 
+    // 5. Smuggling Cove Timber Jetty
     const jt = LANDMARKS.coveJetty;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 3.2), this.barkMat);
     deck.position.set(jt.x - 4, WATER_LEVEL + 0.85, jt.z); deck.castShadow = true; deck.receiveShadow = true;
@@ -763,6 +755,7 @@ export class WorldRenderer {
       }
     }
 
+    // 6. Boundary Cairn Stash
     const cr = LANDMARKS.stashCairn, crY = heightAt(cr.x, cr.z);
     for (let layer = 0; layer < 4; layer++) {
       const st = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4 - layer * 0.32, 1), this.boulderMat);
@@ -771,17 +764,18 @@ export class WorldRenderer {
       this.scene.add(st);
     }
 
-    for (let mz = -360; mz <= 360; mz += 120) {
-      const mx = roadCenterX(mz) + 5.2;
+    // 7. General Wade's Road Stone Milestones (1-to-1 synced with WorldColliders)
+    for (const m of this.colliders.milestones) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.45, 0.42), this.stoneMat);
-      post.position.set(mx, heightAt(mx, mz) + 0.65, mz); post.castShadow = true;
+      post.position.set(m.x, m.y + 0.65, m.z); post.castShadow = true;
       this.scene.add(post);
     }
   }
 
   _buildInstancedTreesAndRocks() {
-    const rng = mulberry32(174401);
-    const maxPines = 600, maxRocks = 560;
+    const pines = this.colliders.pines;
+    const rocksData = this.colliders.rocks;
+
     const trunkGeo = createScotsPineWoodGeometry();
     const crownGeo = createScotsPineCanopyFeatheredGeometry();
     const crownMat = createOnixFoliageMaterial(this.sharedUniforms, { kind: 'pine', map: this.pineBoughTex });
@@ -795,51 +789,38 @@ export class WorldRenderer {
     }
     rockGeo.computeVertexNormals();
 
-    const trunks = new THREE.InstancedMesh(trunkGeo, this.barkMat, maxPines);
-    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, maxPines);
-    const rocks = new THREE.InstancedMesh(rockGeo, this.boulderMat, maxRocks);
+    const trunks = new THREE.InstancedMesh(trunkGeo, this.barkMat, Math.max(1, pines.length));
+    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, Math.max(1, pines.length));
+    const rocks = new THREE.InstancedMesh(rockGeo, this.boulderMat, Math.max(1, rocksData.length));
     trunks.castShadow = trunks.receiveShadow = crowns.castShadow = crowns.receiveShadow = rocks.castShadow = rocks.receiveShadow = true;
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
 
-    let pineCount = 0;
-    for (let tries = 0; tries < 3800 && pineCount < maxPines; tries++) {
-      const x = (rng() - 0.5) * 980, z = (rng() - 0.5) * 980, y = heightAt(x, z);
-      if (y < 2.5 || y > 62) continue;
-      if (Math.abs(x - roadCenterX(z)) < 11.5) continue;
-      if (Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 34) continue;
-      if (Math.hypot(x - LANDMARKS.watchtower.x, z - LANDMARKS.watchtower.z) < 26) continue;
-      if (fbm2D(x * 0.011, z * 0.011, 3, 9101) < -0.14 && rng() > 0.16) continue;
-      if (1 - normalAt(x, z, 1.0).y > 0.27) continue;
-
-      const scale = 0.92 + rng() * 1.25;
-      dummy.position.set(x, y - 0.25, z);
-      dummy.rotation.set((rng() - 0.5) * 0.10, rng() * Math.PI * 2, (rng() - 0.5) * 0.10);
-      dummy.scale.set(scale, scale * (0.90 + rng() * 0.36), scale);
+    for (let i = 0; i < pines.length; i++) {
+      const p = pines[i];
+      dummy.position.set(p.x, p.y - 0.25, p.z);
+      dummy.rotation.set(p.rotX, p.rotY, p.rotZ);
+      dummy.scale.set(p.scale, p.scaleY, p.scale);
       dummy.updateMatrix();
-      trunks.setMatrixAt(pineCount, dummy.matrix);
-      crowns.setMatrixAt(pineCount, dummy.matrix);
-      const tone = 0.78 + rng() * 0.32;
-      color.setRGB(tone * 0.96, tone, tone * 0.92);
-      crowns.setColorAt(pineCount++, color);
+      trunks.setMatrixAt(i, dummy.matrix);
+      crowns.setMatrixAt(i, dummy.matrix);
+      color.setRGB(p.tone * 0.96, p.tone, p.tone * 0.92);
+      crowns.setColorAt(i, color);
     }
-    trunks.count = crowns.count = pineCount;
+    trunks.count = crowns.count = pines.length;
     trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
 
-    let rockCount = 0;
-    for (let tries = 0; tries < 2200 && rockCount < maxRocks; tries++) {
-      const x = (rng() - 0.5) * 980, z = (rng() - 0.5) * 980, y = heightAt(x, z);
-      if (y < 0.2 || Math.abs(x - roadCenterX(z)) < 6.5 || Math.hypot(x - LANDMARKS.clachan.x, z - LANDMARKS.clachan.z) < 24) continue;
-      const sx = 0.65 + rng() * 2.6, sy = 0.38 + rng() * 1.45, sz = 0.65 + rng() * 2.6;
-      dummy.position.set(x, y + sy * 0.14, z);
-      dummy.rotation.set(rng() * 0.6, rng() * Math.PI * 2, rng() * 0.6);
-      dummy.scale.set(sx, sy, sz);
+    for (let i = 0; i < rocksData.length; i++) {
+      const r = rocksData[i];
+      dummy.position.set(r.x, r.y + r.sy * 0.14, r.z);
+      dummy.rotation.set(r.rotX, r.rotY, r.rotZ);
+      dummy.scale.set(r.sx, r.sy, r.sz);
       dummy.updateMatrix();
-      rocks.setMatrixAt(rockCount++, dummy.matrix);
+      rocks.setMatrixAt(i, dummy.matrix);
     }
-    rocks.count = rockCount;
+    rocks.count = rocksData.length;
     rocks.instanceMatrix.needsUpdate = true;
     this.scene.add(trunks, crowns, rocks);
   }
@@ -1099,7 +1080,6 @@ export class WorldRenderer {
     this._updateStreamingFoliage(player.x, player.z, player.camYaw);
     this.bramble.update(mount, this.elapsed);
 
-    // Compute exact First-Person eye position (on-foot stride bob OR horizon-stabilized saddle height)
     const isAiming = (combat.weapon === 'bow' && combat.bowDrawing) || (combat.weapon === 'flintlock' && combat.flintlockReloadTimer <= 0);
     let targetX = player.x;
     let targetZ = player.z;
@@ -1107,7 +1087,6 @@ export class WorldRenderer {
     let horizonRoll = 0;
 
     if (mount.mounted) {
-      // Seat eyes squarely over Bramble's saddle looking out over his arched neck & ears
       const saddleBack = 0.06;
       targetX = mount.x + Math.sin(mount.yaw) * saddleBack;
       targetZ = mount.z + Math.cos(mount.yaw) * saddleBack;
@@ -1123,7 +1102,6 @@ export class WorldRenderer {
     if (this.camPos.lengthSq() === 0) {
       this.camPos.set(targetX, targetY, targetZ);
     } else {
-      // Zero-lag horizontal tracking + silky vertical terrain/saddle stabilization
       this.camPos.x = targetX;
       this.camPos.z = targetZ;
       this.camPos.y = lerp(this.camPos.y, targetY, 1 - Math.exp(-18 * dt));
@@ -1131,7 +1109,6 @@ export class WorldRenderer {
 
     this.playerRig.position.copy(this.camPos);
 
-    // Dynamic First-Person FOV: 68° base for wide melee awareness, 50° focused aim, 74° gallop rush
     const speedNorm = mount.mounted ? clamp(mount.speed / 14.0, 0, 1) : 0;
     const targetFov = isAiming ? 50 : mount.mounted ? lerp(68, 74, speedNorm) : 68;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
@@ -1139,19 +1116,21 @@ export class WorldRenderer {
       this.camera.updateProjectionMatrix();
     }
 
-    // Apply exact eye orientation + tactical combat impact shake (parries, back-targe jolts, flintlock recoil)
     const shake = combat.screenShake;
-    const shakeX = (Math.random() - 0.5) * shake * 0.05;
-    const shakeY = (Math.random() - 0.5) * shake * 0.05;
-    const shakeRoll = (Math.random() - 0.5) * shake * 0.045;
+    const shakeX = (Math.random() - 0.5) * shake * 0.045;
+    const shakeY = (Math.random() - 0.5) * shake * 0.045;
+    const shakeRoll = (Math.random() - 0.5) * shake * 0.04;
 
+    // Apply weighted Dishonored-style directional camera strike torque + recoil kick
     this.camera.position.set(shakeX, shakeY, 0);
-    this.camera.rotation.set(-player.camPitch, player.camYaw, horizonRoll + shakeRoll);
+    this.camera.rotation.set(
+      -player.camPitch + combat.camKickPitch,
+      player.camYaw + combat.camKickYaw,
+      horizonRoll + shakeRoll + combat.camKickRoll
+    );
 
-    // Update Dishonored-style First-Person arms & weapons
     this.fpRig.update(dt, player, mount, combat, this.elapsed);
 
-    // Update atmosphere, sky, water, smoke, Redcoats & gore FX around live eye position
     this._updateAtmosphere(dt, worldState, player.x, player.z);
     this._updateSmoke(dt);
     this.skyDome.position.copy(this.camPos);
