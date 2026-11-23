@@ -3,7 +3,6 @@ import { heightAt, LANDMARKS } from './terrain.js';
 const STORAGE_KEY = 'the_gathering_1744_save_v1';
 
 export function createDefaultWorldState() {
-  // Dramatic ridge vantage overlooking Baile MacRae, Loch Linnhe, and Torr an Fhaire
   const spawnX = 36;
   const spawnZ = 34;
 
@@ -13,7 +12,7 @@ export function createDefaultWorldState() {
     worldSeed: 1744,
     savedAt: new Date().toISOString(),
     dayCount: 1,
-    timeOfDay: 18.6, // Golden Atlantic sunbreak low over Loch Linnhe
+    timeOfDay: 18.6,
     weather: {
       state: 'clear',
       intensity: 0.0
@@ -23,7 +22,7 @@ export function createDefaultWorldState() {
       x: spawnX,
       y: heightAt(spawnX, spawnZ),
       z: spawnZ,
-      yaw: 0.92, // Facing NW across the smoking cottages, sea loch, and watchtower ridge
+      yaw: 0.92,
       stamina: 1.0,
       wetness: 0.0,
       silverShillings: 14,
@@ -34,9 +33,12 @@ export function createDefaultWorldState() {
       breed: 'Highland Garron',
       coatSeed: 407,
       bond: 0.55,
+      stamina: 1.0,
+      calm: 0.92,
       scars: [],
-      x: -44,
-      z: -6
+      x: 29,
+      z: 28,
+      yaw: 0.65
     },
     campUpgrades: {
       smithyBuilt: true,
