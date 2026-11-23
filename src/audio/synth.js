@@ -75,7 +75,6 @@ export class HighlandAudio {
     this.compressor.connect(this.masterGain);
     this.masterGain.connect(ctx.destination);
 
-    // Highland glen canyon echo bus (whistles, steel clangs, flintlock blasts)
     this.echoIn = ctx.createGain();
     this.echoIn.gain.value = 0.36;
     const delay1 = ctx.createDelay(1.2);
@@ -173,7 +172,6 @@ export class HighlandAudio {
     this.windFilter.frequency.setTargetAtTime(240 + windMag * 280 + altFactor * 260 + gust * 90, now, 0.2);
     this.windGain.gain.setTargetAtTime(windLevel, now, 0.2);
     this.rumbleGain.gain.setTargetAtTime(windLevel * 0.75, now, 0.25);
-
     this.rainGain.gain.setTargetAtTime(rainIntensity * 0.34, now, 0.35);
 
     const shoreProx = clamp(1 - Math.max(0, py - WATER_LEVEL) / 14, 0, 1);
@@ -210,6 +208,89 @@ export class HighlandAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, now + 0.025 + Math.random() * 0.025);
     src.connect(bp).connect(g).connect(this.compressor);
     src.start(now, Math.random() * 2.5, 0.06);
+  }
+
+  // Tactile weapon draw/sheathe foley (steel scabbard slide, leather targe buckle, wood bow creak)
+  playEquip(weapon = 'sword') {
+    if (!this.ready || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    if (weapon === 'sword' || weapon === 'dirk') {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(weapon === 'sword' ? 2100 : 3200, now);
+      bp.frequency.exponentialRampToValueAtTime(weapon === 'sword' ? 4200 : 5200, now + 0.18);
+      bp.Q.value = 7.5;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.16, now + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      src.connect(bp).connect(g).connect(this.compressor);
+      src.start(now, Math.random() * 2, 0.24);
+    } else {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(weapon === 'targe' ? 140 : 210, now);
+      osc.frequency.exponentialRampToValueAtTime(70, now + 0.12);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.14, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+      osc.connect(g).connect(this.compressor);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+  }
+
+  // Solid impact sound when arrows thud into Scots pines or musket balls ricochet off stone walls
+  playWorldImpact(material = 'stone', kind = 'arrow', dist = 0) {
+    if (!this.ready || !this.ctx) return;
+    const atten = clamp(1 - dist / 65, 0.08, 1);
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    if (material === 'wood') {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(kind === 'arrow' ? 185 : 140, now);
+      osc.frequency.exponentialRampToValueAtTime(52, now + 0.11);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.32 * atten, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(g).connect(this.compressor);
+      osc.start(now);
+      osc.stop(now + 0.13);
+    } else {
+      // Crisp stone chip & lead ricochet whine
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 2200;
+      bp.Q.value = 2.6;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.30 * atten, now);
+      ng.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      src.connect(bp).connect(ng).connect(this.compressor);
+      src.start(now, Math.random() * 2, 0.14);
+
+      if (kind === 'musket_ball') {
+        const ric = ctx.createOscillator();
+        ric.type = 'sine';
+        ric.frequency.setValueAtTime(2400 + Math.random() * 900, now);
+        ric.frequency.exponentialRampToValueAtTime(620, now + 0.24);
+        const rg = ctx.createGain();
+        rg.gain.setValueAtTime(0.14 * atten, now);
+        rg.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+        ric.connect(rg);
+        rg.connect(this.compressor);
+        rg.connect(this.echoIn);
+        ric.start(now);
+        ric.stop(now + 0.27);
+      }
+    }
   }
 
   playStep(surfaceId, intensity = 0.7, isHoof = false, dist = 0) {
@@ -277,7 +358,6 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2.5, dur + 0.02);
   }
 
-  // Broadsword / Dirk air slice
   playSwing(kind = 'fast_left', heavy = false) {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
@@ -287,25 +367,24 @@ export class HighlandAudio {
 
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    const fStart = kind === 'wipe' ? 2400 : heavy ? 360 : 620;
-    const fEnd = kind === 'wipe' ? 900 : heavy ? 1150 : 1850;
-    const dur = kind === 'wipe' ? 0.24 : heavy ? 0.30 : 0.18;
+    const fStart = kind === 'wipe' ? 2400 : heavy ? 340 : 640;
+    const fEnd = kind === 'wipe' ? 900 : heavy ? 1220 : 1950;
+    const dur = kind === 'wipe' ? 0.24 : heavy ? 0.28 : 0.16;
 
     bp.frequency.setValueAtTime(fStart, now);
-    bp.frequency.exponentialRampToValueAtTime(fEnd, now + dur * 0.55);
+    bp.frequency.exponentialRampToValueAtTime(fEnd, now + dur * 0.45);
     bp.frequency.exponentialRampToValueAtTime(220, now + dur);
     bp.Q.value = kind === 'wipe' ? 4.0 : 2.2;
 
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(heavy ? 0.34 : 0.22, now + dur * 0.35);
+    g.gain.linearRampToValueAtTime(heavy ? 0.36 : 0.23, now + dur * 0.28);
     g.gain.exponentialRampToValueAtTime(0.001, now + dur);
 
     src.connect(bp).connect(g).connect(this.compressor);
     src.start(now, Math.random() * 2, dur + 0.02);
   }
 
-  // Sharp ringing steel-on-steel Perfect Parry clang echoing off the glen walls!
   playParry() {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
@@ -330,7 +409,6 @@ export class HighlandAudio {
     }
   }
 
-  // Heavy studded oak Targe thud / splintering musket-ball deflection
   playTargeBlock(isBall = false, back = false) {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
@@ -360,13 +438,11 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2, 0.16);
   }
 
-  // Visceral flesh cut & heavy bone/dismemberment crunch
   playBloodHit(heavy = false, sever = false) {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
 
-    // Low wet impact thud
     const osc = ctx.createOscillator();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(sever ? 140 : 115, now);
@@ -378,7 +454,6 @@ export class HighlandAudio {
     osc.start(now);
     osc.stop(now + 0.25);
 
-    // Wet tearing slash & bone snap burst
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
     const bp = ctx.createBiquadFilter();
@@ -393,7 +468,6 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2, 0.28);
   }
 
-  // Massive black-powder flintlock / Brown Bess crack rolling through the valley
   playGunshot(dist = 0) {
     if (!this.ready || !this.ctx) return;
     const atten = clamp(1 - dist / 140, 0.12, 1);
@@ -428,7 +502,6 @@ export class HighlandAudio {
     src.start(now, Math.random() * 1.5, 0.50);
   }
 
-  // Wet priming-pan fizzle / dry flint click
   playMisfire(dist = 0) {
     if (!this.ready || !this.ctx) return;
     const atten = clamp(1 - dist / 45, 0.1, 1);
@@ -447,7 +520,6 @@ export class HighlandAudio {
     src.start(now, Math.random() * 2, 0.24);
   }
 
-  // Quiet taut Highland bowstring release
   playBowRelease() {
     if (!this.ready || !this.ctx) return;
     const ctx = this.ctx;
@@ -465,7 +537,6 @@ export class HighlandAudio {
     osc.stop(now + 0.19);
   }
 
-  // Distant Hanoverian corporal shout / whistle warning
   playRedcoatBark(kind = 'spot', dist = 10) {
     if (!this.ready || !this.ctx) return;
     const atten = clamp(1 - dist / 80, 0.1, 1);
