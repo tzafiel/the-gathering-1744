@@ -8,14 +8,14 @@ export class OnixField {
     this.size = size;
     const n = size * size;
 
-    // 1. ONIX Toroidal Field Lattice (Seamless periodic grid uploaded to GPU)
-    // Pillar IV: Complex scalar coherence field psi = re + i*im (moss, lichen, heather clustering)
+    // 1. ONIX Toroidal Field Lattice
+    // Pillar IV: Static relaxed morphogenesis field (moss, lichen, heather colonies)
     this.psiRe = new Float32Array(n);
     this.psiIm = new Float32Array(n);
     this.velRe = new Float32Array(n);
     this.velIm = new Float32Array(n);
 
-    // Pillar II: Chiral LLG spin vector field S = (sx, sy, sz) (wind gusts & brushstroke flow)
+    // Pillar II: Live chiral LLG spin vector field S = (sx, sy, sz) (swirling wind & currents)
     this.sx = new Float32Array(n);
     this.sy = new Float32Array(n);
     this.sz = new Float32Array(n);
@@ -24,7 +24,7 @@ export class OnixField {
     this.moisture = new Float32Array(n);
     this.nextMoisture = new Float32Array(n);
 
-    // Packed RGBA8 GPU texture: R = |psi|^2, G = Sx, B = Sz, A = moisture
+    // Packed RGBA8 GPU texture: R = static |psi|^2, G = live Sx, B = live Sz, A = moisture
     this.data = new Uint8Array(n * 4);
     this.texture = new THREE.DataTexture(this.data, size, size, THREE.RGBAFormat);
     this.texture.wrapS = THREE.RepeatWrapping;
@@ -35,7 +35,7 @@ export class OnixField {
 
     // 2. Local World-Snapped Symplectic 2D Wave Solver (Interactive Water Ripples around Callum)
     this.rippleSize = 64;
-    this.rippleWorldSize = 32.0; // 32m x 32m live wave patch centered on player
+    this.rippleWorldSize = 32.0;
     this.rippleCellSize = this.rippleWorldSize / this.rippleSize;
     this.rippleOrigin = new THREE.Vector2(0, 0);
     this.rippleOriginInit = false;
@@ -46,7 +46,6 @@ export class OnixField {
     this.waveFoam = new Float32Array(rn);
     this.rippleData = new Uint8Array(rn * 4);
 
-    // Packed RGBA8 GPU texture: R = wave height, G = dH/dx, B = dH/dz, A = wake foam
     this.rippleTexture = new THREE.DataTexture(
       this.rippleData,
       this.rippleSize,
@@ -63,9 +62,10 @@ export class OnixField {
     this.tickCounter = 0;
     this._seedLattice(seed);
 
-    // Pre-relax morphogenesis domains so moss, heather, and brushstroke flow start rich on frame 1
-    for (let i = 0; i < 18; i++) {
-      this._stepLattice(0.05, 0.0, 1.0);
+    // Relax morphogenesis domains at boot, then lock them so ground biomes stay grounded
+    for (let i = 0; i < 24; i++) {
+      this._stepMorphogenesis(0.05);
+      this._stepWindAndMoisture(0.05, 0.0, 1.0);
     }
     this._packFieldTexture();
     this._packRippleTexture();
@@ -89,7 +89,6 @@ export class OnixField {
         this.velRe[i] = (rng() - 0.5) * 0.08;
         this.velIm[i] = (rng() - 0.5) * 0.08;
 
-        // Prevailing southwest Atlantic wind bias with organic chiral swirl
         const swirl = Math.sin(x * 0.22 + z * 0.14) * 0.7 + (rng() - 0.5) * 0.9;
         const wx = Math.cos(swirl);
         const wz = Math.sin(swirl);
@@ -104,14 +103,14 @@ export class OnixField {
     }
   }
 
-  _stepLattice(dt, rainIntensity, windStrength) {
+  // Pillar I + IV: Symplectic Leapfrog on V[|psi|^2] = phi*|psi|^4 - |psi|^2 + Laplacian
+  _stepMorphogenesis(dt) {
     const S = this.size;
     const h = Math.min(dt, 0.04);
     const halfH = h * 0.5;
+    const diffK = 0.38;
+    const damp = 0.92;
 
-    // Pillar I + IV: Symplectic Leapfrog on V[|psi|^2] = phi*|psi|^4 - |psi|^2 + Laplacian diffusion
-    const diffK = 0.36;
-    const damp = 0.94;
     for (let z = 0; z < S; z++) {
       for (let x = 0; x < S; x++) {
         const i = z * S + x;
@@ -136,19 +135,22 @@ export class OnixField {
         const fRe = diffK * lapRe - 0.22 * dV * re;
         const fIm = diffK * lapIm - 0.22 * dV * im;
 
-        // Kick-Drift-Kick symplectic update
-        let vRe = (this.velRe[i] + halfH * fRe) * damp;
-        let vIm = (this.velIm[i] + halfH * fIm) * damp;
+        const vRe = (this.velRe[i] + halfH * fRe) * damp;
+        const vIm = (this.velIm[i] + halfH * fIm) * damp;
         this.psiRe[i] = clamp(re + h * vRe, -1.25, 1.25);
         this.psiIm[i] = clamp(im + h * vIm, -1.25, 1.25);
         this.velRe[i] = vRe;
         this.velIm[i] = vIm;
       }
     }
+  }
 
-    // Pillar II: Chiral LLG spin precession + Gilbert damping for swirling glen wind & brushwork flow
+  // Pillar II: Live Chiral LLG Wind Precession + Hydraulic Moisture Diffusion
+  _stepWindAndMoisture(dt, rainIntensity, windStrength) {
+    const S = this.size;
+    const h = Math.min(dt, 0.04);
     const J = 0.45;
-    const D = 0.24; // DMI chirality generates organic wind eddies
+    const D = 0.24;
     const alpha = 0.32;
     const biasX = Math.cos(this.time * 0.14) * 0.48 * windStrength + 0.38;
     const biasZ = Math.sin(this.time * 0.11) * 0.42 * windStrength + 0.18;
@@ -165,17 +167,14 @@ export class OnixField {
         const sy = this.sy[i];
         const sz = this.sz[i];
 
-        // Effective local field H_eff = exchange + chiral DMI curl + prevailing Atlantic wind
         const hx = J * (this.sx[iR] + this.sx[iL] + this.sx[iU] + this.sx[iD]) + D * (this.sz[iU] - this.sz[iD]) + biasX;
         const hy = J * (this.sy[iR] + this.sy[iL] + this.sy[iU] + this.sy[iD]) + 0.15;
         const hz = J * (this.sz[iR] + this.sz[iL] + this.sz[iU] + this.sz[iD]) - D * (this.sx[iR] - this.sx[iL]) + biasZ;
 
-        // Precession S x H
         const cx = sy * hz - sz * hy;
         const cy = sz * hx - sx * hz;
         const cz = sx * hy - sy * hx;
 
-        // Damping S x (S x H)
         const dx = sy * cz - sz * cy;
         const dy = sz * cx - sx * cz;
         const dz = sx * cy - sy * cx;
@@ -189,7 +188,6 @@ export class OnixField {
         this.sy[i] = ny * inv;
         this.sz[i] = nz * inv;
 
-        // Coupled hydraulic moisture diffusion
         const avgM =
           (this.moisture[iR] + this.moisture[iL] + this.moisture[iU] + this.moisture[iD]) * 0.25;
         const m = this.moisture[i] + (avgM - this.moisture[i]) * 0.14;
@@ -218,12 +216,11 @@ export class OnixField {
     this.texture.needsUpdate = true;
   }
 
-  // Symplectic 2D wave solver around player for real physical wakes when wading/running in water
+  // Symplectic 2D wave solver around Callum for interactive loch ripples & wakes
   stepWaterRipples(dt, px, py, pz, speed, waterLevel) {
     const S = this.rippleSize;
     const cell = this.rippleCellSize;
 
-    // Snap wave grid center to cell increments and scroll existing waves smoothly as Callum moves
     const targetOX = Math.round(px / cell) * cell;
     const targetOZ = Math.round(pz / cell) * cell;
 
@@ -259,7 +256,6 @@ export class OnixField {
       }
     }
 
-    // Inject physical wake displacement whenever Callum is in Loch Linnhe or shallow shoreline water
     if (py < waterLevel + 0.12) {
       const halfW = this.rippleWorldSize * 0.5;
       const gx = Math.floor((px - (this.rippleOrigin.x - halfW)) / cell);
@@ -273,7 +269,6 @@ export class OnixField {
           if (cx <= 1 || cx >= S - 2 || cz <= 1 || cz >= S - 2) continue;
           const falloff = dx === 0 && dz === 0 ? 1.0 : 0.45;
           const idx = cz * S + cx;
-          // Alternating subtle cadence while wading, strong V-wake while sprinting
           const pulse = speed > 0.2 ? -impulse : Math.sin(this.time * 5.0) * 0.14;
           this.waveV[idx] = clamp(this.waveV[idx] + pulse * falloff * 1.4, -3.2, 3.2);
           this.waveFoam[idx] = clamp(this.waveFoam[idx] + (0.2 + speed * 0.22) * falloff * dt * 8, 0, 1);
@@ -281,13 +276,11 @@ export class OnixField {
       }
     }
 
-    // Symplectic Störmer-Verlet 2D wave equation step (2 substeps for crisp wave propagation)
     const subDt = Math.min(dt, 0.025) * 0.5;
-    const c2 = 16.0; // Wave phase speed squared
+    const c2 = 16.0;
     const damp = Math.exp(-1.45 * subDt);
 
     for (let step = 0; step < 2; step++) {
-      // Kick velocity using discrete Laplacian
       for (let z = 1; z < S - 1; z++) {
         const row = z * S;
         for (let x = 1; x < S - 1; x++) {
@@ -301,7 +294,6 @@ export class OnixField {
           this.waveV[i] = (this.waveV[i] + c2 * lap * subDt) * damp;
         }
       }
-      // Drift height & decay wake foam
       for (let z = 1; z < S - 1; z++) {
         const row = z * S;
         for (let x = 1; x < S - 1; x++) {
@@ -345,9 +337,8 @@ export class OnixField {
   step(dt, rainIntensity = 0.0, windStrength = 1.0) {
     this.time += dt;
     this.tickCounter++;
-    // Run the slower morphogenesis + wind lattice at 20Hz to keep frame budget effortless
     if (this.tickCounter % 3 === 0) {
-      this._stepLattice(dt * 3, rainIntensity, windStrength);
+      this._stepWindAndMoisture(dt * 3, rainIntensity, windStrength);
       this._packFieldTexture();
     }
   }
