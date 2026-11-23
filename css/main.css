@@ -369,3 +369,20 @@ button.primary:hover {
   padding: 10px 14px;
   background: rgba(20, 25, 22, 0.72);
 }
+#mount-hud {
+  margin-bottom: 7px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(197, 160, 89, 0.22);
+}
+
+.mount-label {
+  width: 96px;
+  color: #d6a46f;
+}
+
+#mount-stamina-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #8b4c24, #d69652);
+  transition: width 0.08s linear;
+}
